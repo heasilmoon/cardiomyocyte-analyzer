@@ -84,7 +84,28 @@ def plot_morphology(result: MorphologyResult, out_path: str) -> None:
     overlay[boundaries] = [1.0, 0.85, 0.0, 1.0]
     ax.imshow(overlay)
 
-    ax.set_title(f"{result.mode.upper()} segmentation — {result.n_objects} objects")
+    df = result.objects_df
+    if result.mode == "2d" and {"centroid-0", "centroid-1", "orientation", "major_axis_length"} <= set(df.columns):
+        for _, row in df.iterrows():
+            y0, x0 = row["centroid-0"], row["centroid-1"]
+            half_len = row["major_axis_length"] / 2.0
+            angle = row["orientation"]
+            dx, dy = np.cos(angle) * half_len, -np.sin(angle) * half_len
+            ax.plot([x0 - dx, x0 + dx], [y0 - dy, y0 + dy], "-", color="#00e5ff", linewidth=1.5)
+    elif result.mode == "3d" and {"centroid-1", "centroid-2", "axis_y", "axis_x", "equivalent_diameter_area"} <= set(
+        df.columns
+    ):
+        for _, row in df.iterrows():
+            y0, x0 = row["centroid-1"], row["centroid-2"]
+            half_len = row["equivalent_diameter_area"] / 2.0
+            dx, dy = row["axis_x"] * half_len, row["axis_y"] * half_len
+            ax.plot([x0 - dx, x0 + dx], [y0 - dy, y0 + dy], "-", color="#00e5ff", linewidth=1.5)
+
+    alignment = result.summary.get("alignment_score", result.summary.get("alignment_score_3d"))
+    title = f"{result.mode.upper()} segmentation — {result.n_objects} objects"
+    if alignment is not None:
+        title += f", alignment {alignment:.2f}"
+    ax.set_title(title)
     ax.axis("off")
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)

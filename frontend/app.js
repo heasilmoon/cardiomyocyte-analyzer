@@ -52,6 +52,10 @@ function fieldLabel(key) {
     median_volume_voxels: "중앙값 부피 (voxel)",
     total_volume_voxels: "총 부피 (voxel)",
     stack_shape_zyx: "스택 크기 (Z,Y,X)",
+    alignment_score: "정렬도 (0-1)",
+    mean_orientation_deg: "평균 방향 (도)",
+    alignment_score_3d: "정렬도 3D (0-1)",
+    mean_direction_zyx: "평균 방향 벡터 (Z,Y,X)",
   };
   return labels[key] || key;
 }
