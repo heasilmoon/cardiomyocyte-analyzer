@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+backend/storage/uploads/*
+!backend/storage/uploads/.gitkeep
+backend/storage/results/*
+!backend/storage/results/.gitkeep
+
+.DS_Store
+*.log
+node_modules/

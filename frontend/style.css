@@ -1,0 +1,127 @@
+:root {
+  color-scheme: light dark;
+  --accent: #c0392b;
+  --bg: #f7f7f8;
+  --panel: #ffffff;
+  --border: #e0e0e0;
+  --text: #1f2328;
+  --muted: #6b7280;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+header {
+  padding: 1.5rem 2rem 0.5rem;
+}
+
+header h1 {
+  margin: 0 0 0.25rem;
+  font-size: 1.5rem;
+}
+
+header p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+main {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 1.5rem 2rem 3rem;
+}
+
+nav.tabs {
+  display: flex;
+  gap: 0.5rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 1.5rem;
+}
+
+nav.tabs button {
+  background: none;
+  border: none;
+  padding: 0.75rem 1rem;
+  font-size: 0.95rem;
+  cursor: pointer;
+  color: var(--muted);
+  border-bottom: 2px solid transparent;
+}
+
+nav.tabs button.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
+.panel {
+  display: none;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.5rem;
+}
+
+.panel.active { display: block; }
+
+.form-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  align-items: flex-end;
+}
+
+.field { display: flex; flex-direction: column; gap: 0.25rem; }
+.field label { font-size: 0.8rem; color: var(--muted); }
+.field input, .field select {
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+button.primary {
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 0.55rem 1.2rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.status { font-size: 0.85rem; color: var(--muted); margin-top: 0.5rem; }
+.status.error { color: var(--accent); }
+
+.results { margin-top: 1.5rem; }
+.results img { max-width: 100%; border: 1px solid var(--border); border-radius: 6px; }
+
+table.summary {
+  border-collapse: collapse;
+  width: 100%;
+  margin-top: 1rem;
+  font-size: 0.9rem;
+}
+table.summary td { padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--border); }
+table.summary td:first-child { color: var(--muted); width: 60%; }
+
+.links { margin-top: 0.75rem; display: flex; gap: 1rem; font-size: 0.85rem; }
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16181c;
+    --panel: #1f2228;
+    --border: #33363c;
+    --text: #e8e8e8;
+    --muted: #9aa0a6;
+  }
+}
