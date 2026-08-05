@@ -38,9 +38,14 @@ def plot_beating(result: BeatingResult, out_path: str) -> None:
             markersize=4,
             label="baseline",
         )
+    ylabel = (
+        "Mean |frame − reference frame| intensity"
+        if result.signal_mode == "reference"
+        else "Mean frame-to-frame intensity change"
+    )
     ax.set_xlabel("Time (s)")
-    ax.set_ylabel("Mean frame-to-frame intensity change")
-    ax.set_title(f"Beating signal — {result.summary.get('n_beats', 0)} beats detected")
+    ax.set_ylabel(ylabel)
+    ax.set_title(f"Beating signal ({result.signal_mode}) — {result.summary.get('n_beats', 0)} beats detected")
     ax.legend(loc="upper right", fontsize=8)
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)

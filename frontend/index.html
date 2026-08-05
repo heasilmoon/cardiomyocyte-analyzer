@@ -19,12 +19,20 @@
     </nav>
 
     <section id="panel-beating" class="panel active">
-      <p>밝은 시야(bright-field) 영상에서 프레임 간 픽셀 변화량을 이용해 수축/이완 신호를 추출하고 박동을 검출합니다.</p>
+      <p>밝은 시야(bright-field) 영상에서 픽셀 변화량을 이용해 수축/이완 신호를 추출하고 박동을 검출합니다.
+      Fiji MUSCLEMOTION 플러그인과 동일한 방식으로, 기본값은 기준(이완기) 프레임 대비 차이를 사용합니다.</p>
       <form data-endpoint="/api/analyze/beating">
         <div class="form-row">
           <div class="field">
             <label>영상 파일 (mp4)</label>
             <input type="file" name="file" accept="video/*" required />
+          </div>
+          <div class="field">
+            <label>신호 방식</label>
+            <select name="signal_mode">
+              <option value="reference">reference (MUSCLEMOTION 기본)</option>
+              <option value="consecutive">consecutive (프레임 간 차이)</option>
+            </select>
           </div>
           <div class="field">
             <label>FPS 강제 지정 (선택)</label>

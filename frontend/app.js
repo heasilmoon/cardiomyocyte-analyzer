@@ -19,6 +19,8 @@ document.querySelectorAll("nav.tabs button").forEach((btn) => {
 
 function fieldLabel(key) {
   const labels = {
+    signal_mode: "신호 방식",
+    reference_frame_index: "기준 프레임 인덱스",
     n_beats: "박동 수",
     duration_s: "영상 길이 (s)",
     mean_bpm: "평균 박동수 (BPM)",
@@ -29,6 +31,8 @@ function fieldLabel(key) {
     amplitude_cv_percent: "진폭 변동계수 (%)",
     mean_contraction_time_s: "평균 수축 시간 (s)",
     mean_relaxation_time_s: "평균 이완 시간 (s)",
+    mean_max_contraction_velocity: "평균 최대 수축 속도 (/s)",
+    mean_max_relaxation_velocity: "평균 최대 이완 속도 (/s)",
     n_transients: "트랜지언트 수",
     mean_frequency_per_min: "평균 빈도 (회/분)",
     mean_inter_peak_interval_s: "평균 피크 간격 (s)",
