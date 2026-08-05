@@ -113,6 +113,14 @@ table.summary {
 }
 table.summary td { padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--border); }
 table.summary td:first-child { color: var(--muted); width: 60%; }
+table.compare-table td:first-child { width: auto; }
+table.compare-table th {
+  text-align: left;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 2px solid var(--border);
+  font-size: 0.8rem;
+  color: var(--muted);
+}
 
 .links { margin-top: 0.75rem; display: flex; gap: 1rem; font-size: 0.85rem; }
 

@@ -82,6 +82,76 @@ function renderResults(container, data) {
   `;
 }
 
+const compareAnalysisType = document.getElementById("compare-analysis-type");
+const compareMorphologyModeField = document.getElementById("compare-morphology-mode-field");
+if (compareAnalysisType) {
+  const syncMorphologyModeVisibility = () => {
+    compareMorphologyModeField.style.display = compareAnalysisType.value === "morphology" ? "" : "none";
+  };
+  compareAnalysisType.addEventListener("change", syncMorphologyModeVisibility);
+  syncMorphologyModeVisibility();
+}
+
+function renderComparisonResults(container, data) {
+  const { comparison, urls } = data;
+  const rows = comparison.metrics
+    .map((m) => {
+      const sig = m.p_value !== null && m.p_value < 0.05 ? " *" : "";
+      const pText = m.p_value !== null ? m.p_value.toFixed(4) + sig : "&mdash;";
+      return `<tr>
+        <td>${fieldLabel(m.metric)}</td>
+        <td>${formatValue(m.mean_a)} &plusmn; ${formatValue(m.std_a)} (n=${m.n_a})</td>
+        <td>${formatValue(m.mean_b)} &plusmn; ${formatValue(m.std_b)} (n=${m.n_b})</td>
+        <td>${pText}</td>
+      </tr>`;
+    })
+    .join("");
+
+  container.innerHTML = `
+    ${urls.plot ? `<img src="${API_BASE}${urls.plot}" alt="comparison plot" />` : ""}
+    <table class="summary compare-table">
+      <thead><tr><th>지표</th><th>${comparison.label_a} (n=${comparison.n_videos_a})</th><th>${comparison.label_b} (n=${comparison.n_videos_b})</th><th>p-value</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="links">
+      ${urls.csv ? `<a href="${API_BASE}${urls.csv}" download>CSV 다운로드</a>` : ""}
+      ${urls.summary ? `<a href="${API_BASE}${urls.summary}" download>요약 JSON 다운로드</a>` : ""}
+    </div>
+  `;
+}
+
+const compareForm = document.getElementById("compare-form");
+if (compareForm) {
+  compareForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const statusEl = compareForm.parentElement.querySelector(".status");
+    const resultsEl = compareForm.parentElement.querySelector(".results");
+    const submitBtn = compareForm.querySelector("button[type=submit]");
+
+    const formData = new FormData(compareForm);
+    submitBtn.disabled = true;
+    statusEl.textContent = "그룹 비교 분석 중입니다... 영상 수에 따라 시간이 걸릴 수 있습니다.";
+    statusEl.classList.remove("error");
+    resultsEl.innerHTML = "";
+
+    try {
+      const res = await fetch(`${API_BASE}/api/analyze/compare`, { method: "POST", body: formData });
+      if (!res.ok) {
+        const detail = await res.json().catch(() => ({}));
+        throw new Error(detail.detail || `요청 실패 (HTTP ${res.status})`);
+      }
+      const data = await res.json();
+      statusEl.textContent = "완료되었습니다.";
+      renderComparisonResults(resultsEl, data);
+    } catch (err) {
+      statusEl.textContent = `오류: ${err.message}`;
+      statusEl.classList.add("error");
+    } finally {
+      submitBtn.disabled = false;
+    }
+  });
+}
+
 document.querySelectorAll("form[data-endpoint]").forEach((form) => {
   form.addEventListener("submit", async (event) => {
     event.preventDefault();

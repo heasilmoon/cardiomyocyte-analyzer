@@ -16,6 +16,7 @@
       <button data-tab="beating" class="active">박동 분석</button>
       <button data-tab="calcium">칼슘 이미징</button>
       <button data-tab="morphology">형태 분석 (2D/3D)</button>
+      <button data-tab="compare">그룹 비교</button>
     </nav>
 
     <section id="panel-beating" class="panel active">
@@ -113,6 +114,53 @@
             <input type="number" name="separation_min_distance" value="10" />
           </div>
           <button class="primary" type="submit">분석 시작</button>
+        </div>
+      </form>
+      <div class="status"></div>
+      <div class="results"></div>
+    </section>
+
+    <section id="panel-compare" class="panel">
+      <p>같은 분석(박동/칼슘/형태)을 여러 영상에 대해 돌린 뒤, 두 그룹(예: 대조군 vs 처리군) 간
+      각 지표를 Mann-Whitney U 검정으로 비교합니다. 각 그룹에 영상을 여러 개 선택해서 올려주세요.</p>
+      <form id="compare-form">
+        <div class="form-row">
+          <div class="field">
+            <label>분석 종류</label>
+            <select name="analysis_type" id="compare-analysis-type">
+              <option value="beating">박동</option>
+              <option value="calcium">칼슘 이미징</option>
+              <option value="morphology">형태 (2D/3D)</option>
+            </select>
+          </div>
+          <div class="field" id="compare-morphology-mode-field" style="display:none;">
+            <label>형태 분석 모드</label>
+            <select name="morphology_mode">
+              <option value="2d">2D</option>
+              <option value="3d">3D</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label>그룹 A 라벨</label>
+            <input type="text" name="group_a_label" value="Control" />
+          </div>
+          <div class="field">
+            <label>그룹 A 영상 (여러 개 선택)</label>
+            <input type="file" name="group_a_files" accept="video/*" multiple required />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label>그룹 B 라벨</label>
+            <input type="text" name="group_b_label" value="Treatment" />
+          </div>
+          <div class="field">
+            <label>그룹 B 영상 (여러 개 선택)</label>
+            <input type="file" name="group_b_files" accept="video/*" multiple required />
+          </div>
+          <button class="primary" type="submit">비교 시작</button>
         </div>
       </form>
       <div class="status"></div>

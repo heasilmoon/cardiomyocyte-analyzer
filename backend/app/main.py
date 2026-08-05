@@ -9,9 +9,12 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+import pandas as pd
+
 from app.analysis import plotting
 from app.analysis.beating import analyze_beating
 from app.analysis.calcium import analyze_calcium
+from app.analysis.group_stats import compare_groups
 from app.analysis.morphology import analyze_morphology_2d, analyze_morphology_3d
 from app.config import FRONTEND_DIR, MAX_FRAMES, MAX_UPLOAD_BYTES, RESULTS_DIR, UPLOADS_DIR
 from app.utils.video_io import VideoLoadError, read_video_frames
@@ -171,6 +174,58 @@ async def analyze_morphology_endpoint(
     plotting.plot_morphology(result, str(result_dir / "plot.png"))
 
     return {"result_id": result_id, "summary": result.summary, "urls": _urls(result_id, result_dir)}
+
+
+def _analyze_one(analysis_type: str, morphology_mode: str, frames, fps) -> dict:
+    if analysis_type == "beating":
+        return analyze_beating(frames, fps).summary
+    if analysis_type == "calcium":
+        return analyze_calcium(frames, fps).summary
+    if morphology_mode == "2d":
+        return analyze_morphology_2d(frames).summary
+    return analyze_morphology_3d(frames).summary
+
+
+async def _summarize_group(files: list[UploadFile], analysis_type: str, morphology_mode: str) -> list[dict]:
+    summaries = []
+    for f in files:
+        path = _save_upload(f)
+        try:
+            frames, fps = _load_frames(path, None)
+            summary = _analyze_one(analysis_type, morphology_mode, frames, fps)
+            summaries.append({"filename": f.filename, **summary})
+        finally:
+            path.unlink(missing_ok=True)
+    return summaries
+
+
+@app.post("/api/analyze/compare")
+async def analyze_compare_endpoint(
+    analysis_type: Literal["beating", "calcium", "morphology"] = Form(...),
+    morphology_mode: Literal["2d", "3d"] = Form(default="2d"),
+    group_a_label: str = Form(default="Group A"),
+    group_b_label: str = Form(default="Group B"),
+    group_a_files: list[UploadFile] = File(...),
+    group_b_files: list[UploadFile] = File(...),
+):
+    if not group_a_files or not group_b_files:
+        raise HTTPException(status_code=400, detail="Both groups need at least one video file")
+
+    summaries_a = await _summarize_group(group_a_files, analysis_type, morphology_mode)
+    summaries_b = await _summarize_group(group_b_files, analysis_type, morphology_mode)
+    comparison = compare_groups(summaries_a, summaries_b, group_a_label, group_b_label)
+
+    result_id, result_dir = _new_result_dir()
+    for s in summaries_a:
+        s["group"] = group_a_label
+    for s in summaries_b:
+        s["group"] = group_b_label
+    combined_df = pd.DataFrame(summaries_a + summaries_b)
+    combined_df.to_csv(result_dir / "data.csv", index=False)
+    (result_dir / "summary.json").write_text(json.dumps(comparison, indent=2))
+    plotting.plot_group_comparison(comparison, str(result_dir / "plot.png"))
+
+    return {"result_id": result_id, "comparison": comparison, "urls": _urls(result_id, result_dir)}
 
 
 # Mounted last so it never shadows the /api/* and /results/* routes above.

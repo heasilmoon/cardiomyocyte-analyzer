@@ -110,3 +110,59 @@ def plot_morphology(result: MorphologyResult, out_path: str) -> None:
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
+
+
+def plot_group_comparison(comparison: dict, out_path: str, max_metrics: int = 12) -> None:
+    """One dot-plot-with-mean-bar panel per metric, group A vs group B.
+
+    Panels are ordered most-significant-first (comparison["metrics"] is
+    already sorted that way) and capped at max_metrics so a summary with
+    many fields doesn't produce an unreadably large grid.
+    """
+    metrics = comparison["metrics"][:max_metrics]
+    label_a, label_b = comparison["label_a"], comparison["label_b"]
+
+    if not metrics:
+        fig, ax = plt.subplots(figsize=(4, 2))
+        ax.text(0.5, 0.5, "No comparable numeric metrics", ha="center", va="center")
+        ax.axis("off")
+        fig.savefig(out_path, dpi=150)
+        plt.close(fig)
+        return
+
+    ncols = min(3, len(metrics))
+    nrows = int(np.ceil(len(metrics) / ncols))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(4.2 * ncols, 3.2 * nrows), squeeze=False)
+
+    for idx, m in enumerate(metrics):
+        ax = axes[idx // ncols][idx % ncols]
+        rng = np.random.default_rng(0)
+        xa = rng.normal(0, 0.05, len(m["values_a"]))
+        xb = rng.normal(1, 0.05, len(m["values_b"]))
+        ax.scatter(xa, m["values_a"], color="#3498db", alpha=0.8, s=25, zorder=3)
+        ax.scatter(xb, m["values_b"], color="#e67e22", alpha=0.8, s=25, zorder=3)
+        ax.errorbar(
+            [0, 1],
+            [m["mean_a"], m["mean_b"]],
+            yerr=[m["std_a"], m["std_b"]],
+            fmt="_",
+            color="black",
+            markersize=20,
+            markeredgewidth=2,
+            capsize=4,
+            zorder=4,
+        )
+        ax.set_xticks([0, 1])
+        ax.set_xticklabels([label_a, label_b], fontsize=8)
+        ax.set_xlim(-0.5, 1.5)
+        p = m["p_value"]
+        p_text = f"p={p:.3g}" if p is not None else "p=n/a"
+        sig = " *" if (p is not None and p < 0.05) else ""
+        ax.set_title(f"{m['metric']}\n{p_text}{sig}", fontsize=9)
+
+    for idx in range(len(metrics), nrows * ncols):
+        axes[idx // ncols][idx % ncols].axis("off")
+
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
