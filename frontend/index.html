@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cardiomyocyte Analyzer</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>Cardiomyocyte Analyzer</h1>
+    <p>심근세포 2D/3D 영상(mp4) 분석 &mdash; 박동, 칼슘 이미징, 형태 분석</p>
+  </header>
+  <main>
+    <nav class="tabs">
+      <button data-tab="beating" class="active">박동 분석</button>
+      <button data-tab="calcium">칼슘 이미징</button>
+      <button data-tab="morphology">형태 분석 (2D/3D)</button>
+    </nav>
+
+    <section id="panel-beating" class="panel active">
+      <p>밝은 시야(bright-field) 영상에서 프레임 간 픽셀 변화량을 이용해 수축/이완 신호를 추출하고 박동을 검출합니다.</p>
+      <form data-endpoint="/api/analyze/beating">
+        <div class="form-row">
+          <div class="field">
+            <label>영상 파일 (mp4)</label>
+            <input type="file" name="file" accept="video/*" required />
+          </div>
+          <div class="field">
+            <label>FPS 강제 지정 (선택)</label>
+            <input type="number" name="fps_override" step="0.1" placeholder="자동 감지" />
+          </div>
+          <div class="field">
+            <label>최소 피크 간격 (bpm 상한)</label>
+            <input type="number" name="min_bpm_gap" value="300" />
+          </div>
+          <div class="field">
+            <label>피크 민감도 (0-1)</label>
+            <input type="number" name="prominence_frac" value="0.15" step="0.01" min="0" max="1" />
+          </div>
+          <button class="primary" type="submit">분석 시작</button>
+        </div>
+      </form>
+      <div class="status"></div>
+      <div class="results"></div>
+    </section>
+
+    <section id="panel-calcium" class="panel">
+      <p>형광 강도(intensity) 변화를 &Delta;F/F0로 정규화하고 칼슘 트랜지언트를 검출합니다.</p>
+      <form data-endpoint="/api/analyze/calcium">
+        <div class="form-row">
+          <div class="field">
+            <label>영상 파일 (mp4)</label>
+            <input type="file" name="file" accept="video/*" required />
+          </div>
+          <div class="field">
+            <label>FPS 강제 지정 (선택)</label>
+            <input type="number" name="fps_override" step="0.1" placeholder="자동 감지" />
+          </div>
+          <div class="field">
+            <label>최소 피크 간격 (분당 상한)</label>
+            <input type="number" name="min_transients_per_min" value="240" />
+          </div>
+          <div class="field">
+            <label>피크 민감도 (0-1)</label>
+            <input type="number" name="prominence_frac" value="0.2" step="0.01" min="0" max="1" />
+          </div>
+          <button class="primary" type="submit">분석 시작</button>
+        </div>
+      </form>
+      <div class="status"></div>
+      <div class="results"></div>
+    </section>
+
+    <section id="panel-morphology" class="panel">
+      <p>2D: 대표 이미지(최대 강도 투영)에서 세포를 분할해 개수/면적 등을 계산합니다. 3D: 영상의 각 프레임을 z-slice로 간주해 부피 기반 형태를 계산합니다.</p>
+      <form data-endpoint="/api/analyze/morphology">
+        <div class="form-row">
+          <div class="field">
+            <label>영상 파일 (mp4)</label>
+            <input type="file" name="file" accept="video/*" required />
+          </div>
+          <div class="field">
+            <label>모드</label>
+            <select name="mode">
+              <option value="2d">2D</option>
+              <option value="3d">3D (z-stack)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>최소 객체 크기 (px/voxel)</label>
+            <input type="number" name="min_object_size" value="30" />
+          </div>
+          <button class="primary" type="submit">분석 시작</button>
+        </div>
+      </form>
+      <div class="status"></div>
+      <div class="results"></div>
+    </section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
