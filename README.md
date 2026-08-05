@@ -14,9 +14,14 @@ Python(FastAPI + OpenCV + scikit-image) 기반으로, Fiji 전체 배포판(수�
   박동수(BPM), 박동 간격(IBI)과 변동계수, 진폭, 수축/이완 시간, 최대 수축/이완 속도를 계산합니다.
 - **칼슘 이미징 분석 (Calcium imaging)**: 형광 강도 트레이스를 ΔF/F0로 정규화하고 각 트랜지언트의
   피크 시각, 진폭, rise time(10–90%), 지수 감쇠 시간상수(τ)를 계산합니다.
-- **형태 분석 (Morphology, 2D/3D)**: 2D는 대표 이미지(최대 강도 투영)를 분할하여 세포 개수·면적·
-  둘레·이심률을 계산하고, 3D는 영상의 각 프레임을 z-slice로 간주해 3차원 연결요소 기반 부피를
-  계산합니다.
+- **형태 분석 (Morphology, 2D/3D)**: 2D는 대표 이미지(최대 강도 투영)를, 3D는 영상의 각 프레임을
+  z-slice로 간주한 부피를 분할해 세포 개수·면적(2D)/부피(3D)·둘레·이심률을 계산합니다. 맞닿은
+  세포는 distance-transform 기반 watershed로 자동 분리됩니다(끌 수도 있음). 세포/구조의 방향
+  정렬도(alignment score, 0=무작위 ~ 1=완전 정렬)도 계산합니다 — 2D는 원형 순서 매개변수(circular
+  order parameter), 3D는 각 객체의 관성텐서로 구한 주축을 이용한 nematic order parameter를 씁니다.
+- **그룹 통계 비교**: 같은 분석을 여러 영상(그룹 A/B, 예: 대조군 vs 처리군)에 대해 돌린 뒤 각
+  지표를 Mann-Whitney U 검정으로 비교합니다. 그룹별 평균±표준편차, p-value, 지표별 dot plot을
+  제공합니다.
 
 모든 분석 결과는 요약 지표(JSON), 개별 이벤트별 표(CSV), 신호/세그멘테이션 플롯(PNG)으로 제공됩니다.
 
@@ -54,10 +59,12 @@ docker run -p 8000:8000 cardiomyocyte-analyzer
 |---|---|
 | `POST /api/analyze/beating` | `file`(mp4), `fps_override`, `min_bpm_gap`(선택, 비우면 자동 추정), `prominence_frac`, `signal_mode`(`reference`/`consecutive`), `reference_index` |
 | `POST /api/analyze/calcium` | `file`(mp4), `fps_override`, `min_transients_per_min`, `prominence_frac` |
-| `POST /api/analyze/morphology` | `file`(mp4), `mode`(`2d`/`3d`), `min_object_size` |
+| `POST /api/analyze/morphology` | `file`(mp4), `mode`(`2d`/`3d`), `min_object_size`, `separate_touching`, `separation_min_distance` |
+| `POST /api/analyze/compare` | `analysis_type`(`beating`/`calcium`/`morphology`), `morphology_mode`, `group_a_label`, `group_b_label`, `group_a_files`(다중), `group_b_files`(다중) |
 
-모든 엔드포인트는 `{result_id, summary, urls: {plot, csv, summary}}` 형태의 JSON을 반환합니다.
-`urls`는 `/results/...` 하위의 정적 파일 경로입니다.
+단일 분석 엔드포인트는 `{result_id, summary, urls: {plot, csv, summary}}` 형태의 JSON을,
+`/compare`는 `{result_id, comparison, urls}` 형태를 반환합니다. `urls`는 `/results/...` 하위의
+정적 파일 경로입니다.
 
 ## 테스트
 
@@ -92,8 +99,16 @@ pytest tests/ -v
   적게(약한 박동이 걸러짐) 나오면, `prominence_frac`을 0.05~0.2 사이에서 조금씩 조정하며 플롯을
   보고 실제 박동 개수와 맞는 값을 찾으세요. 기본값 0.15가 잘 맞지 않는 영상도 있습니다(예:
   진폭이 박동마다 크게 다른 노이즈 많은 저속 촬영본은 0.08~0.10 정도가 더 맞을 수 있음).
-- **맞닿은 세포 분리**: 형태 분석의 연결요소 분할은 서로 맞닿은 세포를 하나로 합칠 수 있습니다.
-  watershed 기반 분리 등으로 개선할 수 있습니다.
+- **맞닿은 세포 분리 (watershed)**: 기본으로 켜져 있지만 `separation_min_distance`(기본 10
+  px/voxel, 예상되는 세포 중심 간 최소 거리)를 세포 크기에 맞게 조정해야 정확합니다. 너무 작으면
+  세포 하나가 여러 개로 잘못 쪼개지고, 너무 크면 맞닿은 세포가 다시 하나로 합쳐집니다.
+- **정렬도(alignment_score) 자동 검증 안 됨**: 합성 이미지(균일하게 기울어진 타원 vs 무작위
+  방향)로는 검증했지만, 실제 Fiji의 OrientationJ 같은 도구 출력과 나란히 비교한 적은 없습니다.
+- **그룹 비교는 2그룹만 지원**: 3그룹 이상 비교(예: 대조군/저용량/고용량)나 ANOVA 등은 아직 없고,
+  `/api/analyze/compare`는 각 그룹의 모든 영상을 해당 분석의 기본 파라미터로만 돌립니다(영상별로
+  `prominence_frac` 등을 따로 맞추려면 단일 분석 엔드포인트로 개별 확인 후 사용하세요). 표본 수가
+  적을 때(그룹당 3개 이하) Mann-Whitney U의 최소 p-value는 통계적으로 0.05 근처에서 막혀 "유의미한
+  차이"를 통계적으로 확정하기 어려울 수 있습니다.
 - **3D 해석**: "3D mp4"는 실제로는 z-slice 순서로 인코딩된 프레임 시퀀스라고 가정합니다. 실제
   현미경 장비가 다른 방식으로 3D 데이터를 mp4에 담는다면 `read_video_frames` 사용 부분을
   조정해야 할 수 있습니다.
