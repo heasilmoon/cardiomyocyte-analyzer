@@ -8,8 +8,10 @@ Python(FastAPI + OpenCV + scikit-image) 기반으로, Fiji 전체 배포판(수�
   Research*)과 동일한 원리로 픽셀 강도 변화를 수축 신호로 씁니다. 기본값(`reference` 모드)은 기준
   (이완기) 프레임 대비 각 프레임의 차이를 사용해 박동 1회당 피크 1개가 나오는 변위(displacement)형
   신호를 만듭니다 — 프레임 간 차이(`consecutive` 모드, 속도형 신호라 박동마다 피크 2개로 잡힐 수
-  있음)도 비교용으로 선택할 수 있습니다. 박동수(BPM), 박동 간격(IBI)과 변동계수, 진폭, 수축/이완
-  시간, 최대 수축/이완 속도를 계산합니다.
+  있음)도 비교용으로 선택할 수 있습니다. 스무딩 폭과 최소 피크 간격은 자기상관(autocorrelation)으로
+  추정한 그 영상의 실제 박동 주기에 맞춰 자동으로 조정되어(예: `min_bpm_gap`을 비워두면 자동), 느린
+  박동(hiPSC-CM, 대략 20-90 BPM)에서 프레임 단위 노이즈를 박동으로 오검출하는 문제를 줄입니다.
+  박동수(BPM), 박동 간격(IBI)과 변동계수, 진폭, 수축/이완 시간, 최대 수축/이완 속도를 계산합니다.
 - **칼슘 이미징 분석 (Calcium imaging)**: 형광 강도 트레이스를 ΔF/F0로 정규화하고 각 트랜지언트의
   피크 시각, 진폭, rise time(10–90%), 지수 감쇠 시간상수(τ)를 계산합니다.
 - **형태 분석 (Morphology, 2D/3D)**: 2D는 대표 이미지(최대 강도 투영)를 분할하여 세포 개수·면적·
@@ -50,7 +52,7 @@ docker run -p 8000:8000 cardiomyocyte-analyzer
 
 | Endpoint | 설명 |
 |---|---|
-| `POST /api/analyze/beating` | `file`(mp4), `fps_override`, `min_bpm_gap`, `prominence_frac`, `signal_mode`(`reference`/`consecutive`), `reference_index` |
+| `POST /api/analyze/beating` | `file`(mp4), `fps_override`, `min_bpm_gap`(선택, 비우면 자동 추정), `prominence_frac`, `signal_mode`(`reference`/`consecutive`), `reference_index` |
 | `POST /api/analyze/calcium` | `file`(mp4), `fps_override`, `min_transients_per_min`, `prominence_frac` |
 | `POST /api/analyze/morphology` | `file`(mp4), `mode`(`2d`/`3d`), `min_object_size` |
 
@@ -67,6 +69,9 @@ pytest tests/ -v
 
 합성 영상으로 각 분석 파이프라인 및 엔드포인트를 검증하는 단위 테스트가 포함되어 있습니다.
 `tests/make_synthetic_video.py` 를 실행하면 데모용 mp4 3종(박동/칼슘/형태)을 생성할 수 있습니다.
+`tests/fixtures/fiji_musclemotion_reference_signal.tsv`는 실제 사용자가 Fiji MUSCLEMOTION으로
+뽑은 수축 신호이고, `test_fiji_regression.py`가 이 신호로 박동 검출이 실제 육안 확인치(~5-6박동,
+~30 BPM)와 맞는지 회귀 테스트로 고정해둡니다.
 
 ## 알려진 한계 및 향후 개선 방향
 

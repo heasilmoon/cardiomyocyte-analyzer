@@ -21,6 +21,9 @@ function fieldLabel(key) {
   const labels = {
     signal_mode: "신호 방식",
     reference_frame_index: "기준 프레임 인덱스",
+    estimated_period_s: "추정 박동 주기 (s)",
+    smoothing_window_s: "스무딩 윈도우 (s)",
+    min_bpm_gap_used: "적용된 최소 피크 간격 (bpm 상한)",
     n_beats: "박동 수",
     duration_s: "영상 길이 (s)",
     mean_bpm: "평균 박동수 (BPM)",

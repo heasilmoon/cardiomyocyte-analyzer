@@ -23,7 +23,12 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 
-from app.analysis.signal_common import detect_peaks, find_local_min_between, smooth
+from app.analysis.signal_common import (
+    detect_peaks,
+    estimate_dominant_period_s,
+    find_local_min_between,
+    smooth,
+)
 
 SignalMode = Literal["reference", "consecutive"]
 
@@ -57,12 +62,22 @@ def pick_reference_frame(frames: np.ndarray, fps: float = 30.0) -> int:
     signal is smoothed first so a single quiet instant — e.g. the momentary
     zero-velocity turning point at the peak of a contraction — isn't mistaken
     for the resting period, which would otherwise happen with a raw argmin.
+
+    The first/last few percent of frames are excluded from the search: the
+    Savitzky-Golay smoothing used here can undershoot right at the array
+    boundary (it has less data to fit a polynomial to there), which can bias
+    a plain argmin toward the very first or last frame even when that isn't
+    actually the calmest part of the recording.
     """
-    if frames.shape[0] < 3:
+    n = frames.shape[0]
+    if n < 10:
         return 0
     consecutive = _consecutive_diff_signal(frames)
     smoothed = smooth(consecutive, fps, window_seconds=0.3)
-    return int(np.argmin(smoothed))
+    margin = max(int(round(0.03 * len(smoothed))), 2)
+    if len(smoothed) <= 2 * margin:
+        return int(np.argmin(smoothed))
+    return margin + int(np.argmin(smoothed[margin:-margin]))
 
 
 def compute_motion_signal(
@@ -99,7 +114,7 @@ def compute_motion_signal(
 def analyze_beating(
     frames: np.ndarray,
     fps: float,
-    min_bpm_gap: float = 300.0,
+    min_bpm_gap: float | None = None,
     prominence_frac: float = 0.15,
     signal_mode: SignalMode = "reference",
     reference_index: int | None = None,
@@ -110,7 +125,20 @@ def analyze_beating(
     n = len(raw_signal)
     time_s = np.arange(n) / fps
 
-    smoothed = smooth(raw_signal, fps)
+    # Auto-tune the smoothing window and minimum peak spacing to the video's
+    # own dominant beat period instead of assuming a fixed, fast default.
+    # A short fixed window (e.g. 0.15s) undersmooths slow hiPSC-CM beating
+    # (~0.5-1.5 Hz, i.e. 0.7-2s period) enough that frame-level noise/
+    # compression artifacts can pass the prominence test and get counted as
+    # extra beats. Autocorrelation on the raw signal is a robust way to find
+    # the true repeat period even with a smaller high-frequency contaminant
+    # riding on top of it.
+    estimated_period_s = estimate_dominant_period_s(raw_signal, fps)
+    smoothing_window_s = float(np.clip(estimated_period_s / 6.0, 0.05, 0.5))
+    if min_bpm_gap is None:
+        min_bpm_gap = float(np.clip(100.0 / estimated_period_s, 30.0, 400.0))
+
+    smoothed = smooth(raw_signal, fps, window_seconds=smoothing_window_s)
     peaks = detect_peaks(smoothed, fps, min_bpm_gap=min_bpm_gap, prominence_frac=prominence_frac)
 
     troughs = []
@@ -162,6 +190,9 @@ def analyze_beating(
     summary = {
         "signal_mode": signal_mode,
         "reference_frame_index": used_reference_index,
+        "estimated_period_s": estimated_period_s,
+        "smoothing_window_s": smoothing_window_s,
+        "min_bpm_gap_used": min_bpm_gap,
         "n_beats": int(len(peaks)),
         "duration_s": float(n / fps),
         "mean_bpm": float(60.0 / ibis.mean()) if len(ibis) else None,

@@ -83,7 +83,7 @@ def _urls(result_id: str, result_dir: Path) -> dict:
 async def analyze_beating_endpoint(
     file: UploadFile = File(...),
     fps_override: float | None = Form(default=None),
-    min_bpm_gap: float = Form(default=300.0),
+    min_bpm_gap: float | None = Form(default=None),
     prominence_frac: float = Form(default=0.15),
     signal_mode: Literal["reference", "consecutive"] = Form(default="reference"),
     reference_index: int | None = Form(default=None),
