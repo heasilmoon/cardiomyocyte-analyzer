@@ -47,6 +47,45 @@ def detect_peaks(
     return peaks
 
 
+def estimate_dominant_period_s(
+    signal: np.ndarray,
+    fps: float,
+    min_bpm: float = 15.0,
+    max_bpm: float = 200.0,
+) -> float:
+    """Estimate the signal's dominant repeat period via autocorrelation.
+
+    Restricting the search to a physiologically plausible band (default
+    15-200 BPM, well above typical hiPSC-CM range but well below e.g. mouse
+    heart rate) keeps this from locking onto sub-beat noise or single-frame
+    artifacts, and it's fairly robust to a small high-frequency contaminant
+    riding on top of the real beat waveform since autocorrelation averages
+    over the whole signal rather than looking at any single point.
+
+    Returns the period in seconds; falls back to 1.0s (60 BPM) if the signal
+    is too short or has no variation to measure.
+    """
+    n = len(signal)
+    if n < 10:
+        return 1.0
+    x = signal.astype(np.float64) - np.mean(signal)
+    if np.allclose(x, 0):
+        return 1.0
+    autocorr = np.correlate(x, x, mode="full")[n - 1 :]
+    if autocorr[0] <= 0:
+        return 1.0
+    autocorr = autocorr / autocorr[0]
+
+    min_lag = max(int(round(fps * 60.0 / max_bpm)), 1)
+    max_lag = min(int(round(fps * 60.0 / min_bpm)), n - 1)
+    if max_lag <= min_lag:
+        return 1.0
+
+    segment = autocorr[min_lag : max_lag + 1]
+    best_lag = min_lag + int(np.argmax(segment))
+    return best_lag / fps
+
+
 def find_local_min_between(signal: np.ndarray, start: int, end: int) -> int:
     """Index of the minimum value of signal within [start, end)."""
     start = max(start, 0)
