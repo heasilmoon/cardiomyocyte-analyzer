@@ -85,11 +85,20 @@ async def analyze_beating_endpoint(
     fps_override: float | None = Form(default=None),
     min_bpm_gap: float = Form(default=300.0),
     prominence_frac: float = Form(default=0.15),
+    signal_mode: Literal["reference", "consecutive"] = Form(default="reference"),
+    reference_index: int | None = Form(default=None),
 ):
     upload_path = _save_upload(file)
     try:
         frames, fps = _load_frames(upload_path, fps_override)
-        result = analyze_beating(frames, fps, min_bpm_gap=min_bpm_gap, prominence_frac=prominence_frac)
+        result = analyze_beating(
+            frames,
+            fps,
+            min_bpm_gap=min_bpm_gap,
+            prominence_frac=prominence_frac,
+            signal_mode=signal_mode,
+            reference_index=reference_index,
+        )
     finally:
         upload_path.unlink(missing_ok=True)
 

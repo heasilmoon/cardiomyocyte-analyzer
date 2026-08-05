@@ -4,9 +4,12 @@ Fiji/ImageJ 없이 심근세포(cardiomyocyte) 2D/3D 현미경 영상(mp4)을 �
 Python(FastAPI + OpenCV + scikit-image) 기반으로, Fiji 전체 배포판(수백 MB ~ 1GB 이상)을 설치하지
 않고도 아래 세 가지 핵심 분석을 브라우저에서 바로 수행할 수 있습니다.
 
-- **박동 분석 (Beating analysis)**: 밝은 시야(bright-field) 영상에서 프레임 간 픽셀 변화량으로
-  수축/이완 신호를 추출하고(MUSCLEMOTION 계열 방식), 박동수(BPM), 박동 간격(IBI)과 변동계수,
-  진폭, 수축/이완 시간을 계산합니다.
+- **박동 분석 (Beating analysis)**: Fiji **MUSCLEMOTION** 플러그인(Sala et al., 2018, *Circulation
+  Research*)과 동일한 원리로 픽셀 강도 변화를 수축 신호로 씁니다. 기본값(`reference` 모드)은 기준
+  (이완기) 프레임 대비 각 프레임의 차이를 사용해 박동 1회당 피크 1개가 나오는 변위(displacement)형
+  신호를 만듭니다 — 프레임 간 차이(`consecutive` 모드, 속도형 신호라 박동마다 피크 2개로 잡힐 수
+  있음)도 비교용으로 선택할 수 있습니다. 박동수(BPM), 박동 간격(IBI)과 변동계수, 진폭, 수축/이완
+  시간, 최대 수축/이완 속도를 계산합니다.
 - **칼슘 이미징 분석 (Calcium imaging)**: 형광 강도 트레이스를 ΔF/F0로 정규화하고 각 트랜지언트의
   피크 시각, 진폭, rise time(10–90%), 지수 감쇠 시간상수(τ)를 계산합니다.
 - **형태 분석 (Morphology, 2D/3D)**: 2D는 대표 이미지(최대 강도 투영)를 분할하여 세포 개수·면적·
@@ -47,7 +50,7 @@ docker run -p 8000:8000 cardiomyocyte-analyzer
 
 | Endpoint | 설명 |
 |---|---|
-| `POST /api/analyze/beating` | `file`(mp4), `fps_override`, `min_bpm_gap`, `prominence_frac` |
+| `POST /api/analyze/beating` | `file`(mp4), `fps_override`, `min_bpm_gap`, `prominence_frac`, `signal_mode`(`reference`/`consecutive`), `reference_index` |
 | `POST /api/analyze/calcium` | `file`(mp4), `fps_override`, `min_transients_per_min`, `prominence_frac` |
 | `POST /api/analyze/morphology` | `file`(mp4), `mode`(`2d`/`3d`), `min_object_size` |
 
@@ -71,6 +74,12 @@ pytest tests/ -v
   픽셀·복셀 단위입니다. 캘리브레이션 값을 입력받아 환산하는 기능은 아직 없습니다.
 - **ROI 선택**: 칼슘 이미징은 현재 전체 프레임 평균 강도를 사용합니다. 특정 세포/영역만 골라
   분석하는 ROI 드로잉 UI는 향후 추가가 필요합니다.
+- **기준 프레임 자동 선택**: 박동 분석의 `reference` 모드는 기준 프레임을 자동으로(가장 넓은
+  저모션 구간의 중앙 프레임) 고릅니다. 영상이 매우 짧거나 이완기 구간이 거의 없으면 잘못된 프레임이
+  선택될 수 있으니, 그런 경우 `reference_index`를 직접 지정하세요.
+- **정확도 검증**: 알고리즘은 MUSCLEMOTION/표준 문헌 방식을 따르지만, 실제 Fiji 출력값과의
+  정량적인 나란히-비교(side-by-side) 검증은 아직 수행하지 않았습니다. 중요한 실험에는 같은 영상을
+  Fiji로도 돌려 수치를 교차 확인하는 것을 권장합니다.
 - **맞닿은 세포 분리**: 형태 분석의 연결요소 분할은 서로 맞닿은 세포를 하나로 합칠 수 있습니다.
   watershed 기반 분리 등으로 개선할 수 있습니다.
 - **3D 해석**: "3D mp4"는 실제로는 z-slice 순서로 인코딩된 프레임 시퀀스라고 가정합니다. 실제

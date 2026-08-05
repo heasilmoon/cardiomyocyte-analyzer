@@ -1,24 +1,39 @@
 """Contraction/beating analysis for bright-field cardiomyocyte video.
 
-Approach (similar in spirit to MUSCLEMOTION / pixel-differencing methods
-used in the cardiomyocyte literature): sum of absolute pixel-intensity
-differences between consecutive frames is used as a proxy for contractile
-motion. Peaks in that signal correspond to individual beats.
+Implements the same core idea as Fiji's MUSCLEMOTION plugin (Sala et al.,
+2018, Circulation Research): pixel-intensity differences over time are used
+as a proxy for contractile motion, and beats are detected as peaks in that
+signal. Two signal modes are supported, matching MUSCLEMOTION's two modes:
+
+- "reference" (default): each frame is compared to a single resting/diastolic
+  reference frame. This produces a displacement-like signal that rises during
+  contraction and falls during relaxation, giving one clean peak per beat.
+  This is MUSCLEMOTION's primary/recommended mode.
+- "consecutive": each frame is compared to the previous frame. This produces
+  a velocity-like signal that is more sensitive to fast motion but tends to
+  show two peaks per beat (one for the contraction stroke, one for the
+  relaxation stroke) when contraction and relaxation happen at comparable
+  speed. Kept as an option for comparison/debugging.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Literal
 
 import numpy as np
 import pandas as pd
 
 from app.analysis.signal_common import detect_peaks, find_local_min_between, smooth
 
+SignalMode = Literal["reference", "consecutive"]
+
 
 @dataclass
 class BeatingResult:
     fps: float
     n_frames: int
+    signal_mode: str
+    reference_frame_index: int | None
     time_s: np.ndarray
     raw_signal: np.ndarray
     smoothed_signal: np.ndarray
@@ -28,18 +43,57 @@ class BeatingResult:
     summary: dict = field(default_factory=dict)
 
 
-def compute_motion_signal(frames: np.ndarray) -> np.ndarray:
-    """Frame-to-frame absolute-difference signal, one value per transition.
+def _consecutive_diff_signal(frames: np.ndarray) -> np.ndarray:
+    diffs = np.abs(np.diff(frames.astype(np.float32), axis=0))
+    return diffs.mean(axis=(1, 2))
+
+
+def pick_reference_frame(frames: np.ndarray, fps: float = 30.0) -> int:
+    """Pick a resting/diastolic frame to use as the MUSCLEMOTION-style reference.
+
+    Finds the widest low-motion stretch of the consecutive frame-to-frame
+    difference signal (a proxy for diastole, which usually lasts longer than
+    the contraction stroke) and returns a frame in the middle of it. The
+    signal is smoothed first so a single quiet instant — e.g. the momentary
+    zero-velocity turning point at the peak of a contraction — isn't mistaken
+    for the resting period, which would otherwise happen with a raw argmin.
+    """
+    if frames.shape[0] < 3:
+        return 0
+    consecutive = _consecutive_diff_signal(frames)
+    smoothed = smooth(consecutive, fps, window_seconds=0.3)
+    return int(np.argmin(smoothed))
+
+
+def compute_motion_signal(
+    frames: np.ndarray,
+    mode: SignalMode = "reference",
+    reference_index: int | None = None,
+    fps: float = 30.0,
+) -> tuple[np.ndarray, int | None]:
+    """Motion signal used as the contraction proxy.
 
     frames: (N, H, W) grayscale array.
-    Returns an array of length N-1; index i corresponds to the transition
-    between frame i and frame i+1.
+    Returns (signal, reference_frame_index). reference_frame_index is None
+    for "consecutive" mode. In "reference" mode the signal has length N
+    (one value per frame, index 0 included); in "consecutive" mode it has
+    length N-1 (one value per frame-to-frame transition).
     """
     if frames.ndim != 3:
         raise ValueError("Expected grayscale frames with shape (N, H, W)")
-    diffs = np.abs(np.diff(frames.astype(np.float32), axis=0))
-    signal = diffs.mean(axis=(1, 2))
-    return signal
+
+    if mode == "consecutive":
+        return _consecutive_diff_signal(frames), None
+
+    if mode != "reference":
+        raise ValueError(f"Unknown signal mode: {mode}")
+
+    if reference_index is None:
+        reference_index = pick_reference_frame(frames, fps=fps)
+    reference_index = int(np.clip(reference_index, 0, frames.shape[0] - 1))
+    reference = frames[reference_index].astype(np.float32)
+    signal = np.abs(frames.astype(np.float32) - reference[None, ...]).mean(axis=(1, 2))
+    return signal, reference_index
 
 
 def analyze_beating(
@@ -47,8 +101,12 @@ def analyze_beating(
     fps: float,
     min_bpm_gap: float = 300.0,
     prominence_frac: float = 0.15,
+    signal_mode: SignalMode = "reference",
+    reference_index: int | None = None,
 ) -> BeatingResult:
-    raw_signal = compute_motion_signal(frames)
+    raw_signal, used_reference_index = compute_motion_signal(
+        frames, mode=signal_mode, reference_index=reference_index, fps=fps
+    )
     n = len(raw_signal)
     time_s = np.arange(n) / fps
 
@@ -73,6 +131,15 @@ def analyze_beating(
         relaxation_time_s = float(time_s[trough_after] - time_s[peak]) if trough_after < n else None
         ibi_s = float(time_s[peaks[i]] - time_s[peaks[i - 1]]) if i > 0 else None
 
+        contraction_segment = smoothed[trough_before : peak + 1]
+        max_contraction_velocity = (
+            float(np.max(np.diff(contraction_segment)) * fps) if len(contraction_segment) > 1 else None
+        )
+        relaxation_segment = smoothed[peak : trough_after + 1]
+        max_relaxation_velocity = (
+            float(-np.min(np.diff(relaxation_segment)) * fps) if len(relaxation_segment) > 1 else None
+        )
+
         beats.append(
             {
                 "beat_index": i,
@@ -80,6 +147,8 @@ def analyze_beating(
                 "amplitude": amplitude,
                 "contraction_time_s": contraction_time_s,
                 "relaxation_time_s": relaxation_time_s,
+                "max_contraction_velocity": max_contraction_velocity,
+                "max_relaxation_velocity": max_relaxation_velocity,
                 "inter_beat_interval_s": ibi_s,
                 "instantaneous_bpm": (60.0 / ibi_s) if ibi_s else None,
             }
@@ -91,6 +160,8 @@ def analyze_beating(
     amplitudes = beats_df["amplitude"].to_numpy() if len(beats_df) else np.array([])
 
     summary = {
+        "signal_mode": signal_mode,
+        "reference_frame_index": used_reference_index,
         "n_beats": int(len(peaks)),
         "duration_s": float(n / fps),
         "mean_bpm": float(60.0 / ibis.mean()) if len(ibis) else None,
@@ -109,11 +180,19 @@ def analyze_beating(
         "mean_relaxation_time_s": (
             float(beats_df["relaxation_time_s"].dropna().mean()) if len(beats_df) else None
         ),
+        "mean_max_contraction_velocity": (
+            float(beats_df["max_contraction_velocity"].dropna().mean()) if len(beats_df) else None
+        ),
+        "mean_max_relaxation_velocity": (
+            float(beats_df["max_relaxation_velocity"].dropna().mean()) if len(beats_df) else None
+        ),
     }
 
     return BeatingResult(
         fps=fps,
         n_frames=int(frames.shape[0]),
+        signal_mode=signal_mode,
+        reference_frame_index=used_reference_index,
         time_s=time_s,
         raw_signal=raw_signal,
         smoothed_signal=smoothed,
