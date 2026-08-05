@@ -101,6 +101,17 @@
             <label>최소 객체 크기 (px/voxel)</label>
             <input type="number" name="min_object_size" value="30" />
           </div>
+          <div class="field">
+            <label>맞닿은 세포 분리 (watershed)</label>
+            <select name="separate_touching">
+              <option value="true">켜기 (기본)</option>
+              <option value="false">끄기</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>세포 간 최소 간격 (px/voxel)</label>
+            <input type="number" name="separation_min_distance" value="10" />
+          </div>
           <button class="primary" type="submit">분석 시작</button>
         </div>
       </form>
