@@ -114,3 +114,29 @@ pytest tests/ -v
   조정해야 할 수 있습니다.
 - 업로드 용량 상한(`MAX_UPLOAD_BYTES`, 기본 300MB)과 최대 프레임 수(`MAX_FRAMES`, 기본 3000)는
   `backend/app/config.py`에서 조정할 수 있습니다.
+
+## 라이선스 및 인용
+
+MIT 라이선스([LICENSE](LICENSE))입니다. `CITATION.cff`에 인용 메타데이터가 있고(GitHub의
+"Cite this repository" 버튼에 자동으로 뜹니다), `paper/`에는 JOSS(Journal of Open Source
+Software) 제출용 논문 초안 틀이 있습니다 — 저자 정보와 검증 결과를 채워 넣으면 됩니다. 사용 전에
+`LICENSE`와 `CITATION.cff`의 `[YOUR NAME]` 등 대괄호 자리표시자를 실제 정보로 바꿔주세요.
+
+## 논문 게재를 위한 검증 워크플로우
+
+이 도구를 학술지에 게재하려면(예: JOSS), Fiji 같은 기존 검증된 방법과의 정량적 일치도를 보여주는
+것이 핵심입니다. 아래 순서로 진행하세요.
+
+1. **배치 분석으로 이 도구의 값 뽑기**: `POST /api/analyze/batch`에 같은 분석 종류의 영상을
+   여러 개 올리면 영상별 요약 지표가 담긴 CSV 하나로 나옵니다.
+2. **Fiji로 같은 영상들 분석**: 기존에 쓰시던 Fiji 워크플로우(MUSCLEMOTION 등)로 같은 영상들을
+   분석해서 기준값(정답값) CSV를 만드세요.
+3. **두 CSV를 지표 하나 기준으로 짝지어 하나의 CSV로 합치기**: 각 행에 `이 도구 값`과
+   `Fiji 값` 두 열이 있어야 합니다(영상 파일명으로 순서를 맞추면 됩니다).
+4. **일치도 분석**: `POST /api/validate/agreement`에 그 CSV와 두 열 이름을 넘기면 Pearson/
+   Spearman 상관계수, ICC(2,1) (절대적 일치도), Bland-Altman bias와 95% 일치 한계(limits of
+   agreement)를 계산하고, 산점도 + Bland-Altman 플롯을 만들어줍니다. 이 결과를 그대로 논문의
+   Validation 섹션/Figure로 쓸 수 있습니다.
+
+n(영상 수)이 클수록, 여러 조건(세포주, 배양일 등)에 걸쳐 있을수록 통계적으로 설득력이 커집니다.
+정확한 표본 크기 기준은 목표 저널의 가이드라인을 확인하세요.

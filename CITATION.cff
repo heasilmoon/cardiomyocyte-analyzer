@@ -1,0 +1,42 @@
+# This file lets GitHub show a "Cite this repository" button and lets tools
+# like Zenodo auto-generate a citation / DOI for a release.
+# Fill in the bracketed placeholders before your first tagged release.
+# Validate locally with: pip install cffconvert && cffconvert --validate
+cff-version: 1.2.0
+message: "If you use this software in your research, please cite it using the metadata below."
+title: "Cardiomyocyte Analyzer"
+abstract: >
+  A lightweight, Fiji/ImageJ-free tool for analyzing 2D/3D cardiomyocyte
+  microscopy video: beating (contraction) kinetics, calcium transients, and
+  2D/3D morphology (cell count, area/volume, alignment), with two-group
+  statistical comparison across conditions.
+authors:
+  - family-names: "[YOUR LAST NAME]"
+    given-names: "[YOUR FIRST NAME]"
+    affiliation: "[YOUR INSTITUTION]"
+    orcid: "https://orcid.org/[YOUR ORCID, OPTIONAL]"
+version: 0.1.0
+date-released: "2026-08-10"
+license: MIT
+repository-code: "https://github.com/heasilmoon/cardiomyocyte-analyzer"
+url: "https://github.com/heasilmoon/cardiomyocyte-analyzer"
+keywords:
+  - cardiomyocyte
+  - contraction analysis
+  - calcium imaging
+  - cell morphology
+  - image analysis
+  - open source software
+
+# Once a paper (e.g. a JOSS submission) is accepted, add a block like this so
+# citations point people to the paper instead of/alongside the repository:
+#
+# preferred-citation:
+#   type: article
+#   title: "Cardiomyocyte Analyzer: a lightweight tool for cardiomyocyte video analysis"
+#   authors:
+#     - family-names: "[YOUR LAST NAME]"
+#       given-names: "[YOUR FIRST NAME]"
+#   journal: "Journal of Open Source Software"
+#   year: 2026
+#   doi: "[FILL IN AFTER ACCEPTANCE]"

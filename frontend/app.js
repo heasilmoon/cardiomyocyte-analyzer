@@ -56,6 +56,19 @@ function fieldLabel(key) {
     mean_orientation_deg: "평균 방향 (도)",
     alignment_score_3d: "정렬도 3D (0-1)",
     mean_direction_zyx: "평균 방향 벡터 (Z,Y,X)",
+    n: "표본 수 (n)",
+    pearson_r: "Pearson r",
+    pearson_p: "Pearson p-value",
+    spearman_r: "Spearman ρ",
+    spearman_p: "Spearman p-value",
+    icc_2_1: "ICC(2,1) 절대 일치도",
+    bland_altman_bias: "Bland-Altman bias",
+    bland_altman_sd_diff: "차이의 표준편차",
+    bland_altman_loa_lower: "95% 일치 한계 (하한)",
+    bland_altman_loa_upper: "95% 일치 한계 (상한)",
+    regression_slope: "회귀 기울기",
+    regression_intercept: "회귀 절편",
+    regression_r_squared: "회귀 R²",
   };
   return labels[key] || key;
 }
@@ -143,6 +156,122 @@ if (compareForm) {
       const data = await res.json();
       statusEl.textContent = "완료되었습니다.";
       renderComparisonResults(resultsEl, data);
+    } catch (err) {
+      statusEl.textContent = `오류: ${err.message}`;
+      statusEl.classList.add("error");
+    } finally {
+      submitBtn.disabled = false;
+    }
+  });
+}
+
+const batchAnalysisType = document.getElementById("batch-analysis-type");
+const batchMorphologyModeField = document.getElementById("batch-morphology-mode-field");
+if (batchAnalysisType) {
+  const syncBatchMorphologyModeVisibility = () => {
+    batchMorphologyModeField.style.display = batchAnalysisType.value === "morphology" ? "" : "none";
+  };
+  batchAnalysisType.addEventListener("change", syncBatchMorphologyModeVisibility);
+  syncBatchMorphologyModeVisibility();
+}
+
+function renderBatchResults(container, data) {
+  const { summaries, urls } = data;
+  if (!summaries.length) {
+    container.innerHTML = "<p>결과가 없습니다.</p>";
+    return;
+  }
+  const columns = Object.keys(summaries[0]);
+  const header = columns.map((c) => `<th>${c === "filename" ? "파일명" : fieldLabel(c)}</th>`).join("");
+  const rows = summaries
+    .map((s) => `<tr>${columns.map((c) => `<td>${formatValue(s[c])}</td>`).join("")}</tr>`)
+    .join("");
+
+  container.innerHTML = `
+    <div style="overflow-x:auto;">
+      <table class="summary compare-table">
+        <thead><tr>${header}</tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <div class="links">
+      ${urls.csv ? `<a href="${API_BASE}${urls.csv}" download>CSV 다운로드</a>` : ""}
+      ${urls.summary ? `<a href="${API_BASE}${urls.summary}" download>요약 JSON 다운로드</a>` : ""}
+    </div>
+  `;
+}
+
+const batchForm = document.getElementById("batch-form");
+if (batchForm) {
+  batchForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const statusEl = document.getElementById("batch-status");
+    const resultsEl = document.getElementById("batch-results");
+    const submitBtn = batchForm.querySelector("button[type=submit]");
+
+    const formData = new FormData(batchForm);
+    submitBtn.disabled = true;
+    statusEl.textContent = "배치 분석 중입니다... 영상 수에 따라 시간이 걸릴 수 있습니다.";
+    statusEl.classList.remove("error");
+    resultsEl.innerHTML = "";
+
+    try {
+      const res = await fetch(`${API_BASE}/api/analyze/batch`, { method: "POST", body: formData });
+      if (!res.ok) {
+        const detail = await res.json().catch(() => ({}));
+        throw new Error(detail.detail || `요청 실패 (HTTP ${res.status})`);
+      }
+      const data = await res.json();
+      statusEl.textContent = `완료되었습니다 (영상 ${data.n_videos}개).`;
+      renderBatchResults(resultsEl, data);
+    } catch (err) {
+      statusEl.textContent = `오류: ${err.message}`;
+      statusEl.classList.add("error");
+    } finally {
+      submitBtn.disabled = false;
+    }
+  });
+}
+
+function renderAgreementResults(container, data) {
+  const { stats, urls } = data;
+  const rows = Object.entries(stats)
+    .map(([k, v]) => `<tr><td>${fieldLabel(k)}</td><td>${formatValue(v)}</td></tr>`)
+    .join("");
+
+  container.innerHTML = `
+    ${urls.plot ? `<img src="${API_BASE}${urls.plot}" alt="agreement plot" />` : ""}
+    <table class="summary">${rows}</table>
+    <div class="links">
+      ${urls.csv ? `<a href="${API_BASE}${urls.csv}" download>CSV 다운로드</a>` : ""}
+      ${urls.summary ? `<a href="${API_BASE}${urls.summary}" download>요약 JSON 다운로드</a>` : ""}
+    </div>
+  `;
+}
+
+const agreementForm = document.getElementById("agreement-form");
+if (agreementForm) {
+  agreementForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const statusEl = document.getElementById("agreement-status");
+    const resultsEl = document.getElementById("agreement-results");
+    const submitBtn = agreementForm.querySelector("button[type=submit]");
+
+    const formData = new FormData(agreementForm);
+    submitBtn.disabled = true;
+    statusEl.textContent = "일치도 분석 중입니다...";
+    statusEl.classList.remove("error");
+    resultsEl.innerHTML = "";
+
+    try {
+      const res = await fetch(`${API_BASE}/api/validate/agreement`, { method: "POST", body: formData });
+      if (!res.ok) {
+        const detail = await res.json().catch(() => ({}));
+        throw new Error(detail.detail || `요청 실패 (HTTP ${res.status})`);
+      }
+      const data = await res.json();
+      statusEl.textContent = "완료되었습니다.";
+      renderAgreementResults(resultsEl, data);
     } catch (err) {
       statusEl.textContent = `오류: ${err.message}`;
       statusEl.classList.add("error");
