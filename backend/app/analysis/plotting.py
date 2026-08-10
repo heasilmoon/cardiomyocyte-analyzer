@@ -74,7 +74,12 @@ def plot_calcium(result: CalciumResult, out_path: str) -> None:
 
 
 def plot_morphology(result: MorphologyResult, out_path: str) -> None:
-    fig, ax = plt.subplots(figsize=(6, 6))
+    has_texture_map = result.orientation_map is not None
+    if has_texture_map:
+        fig, (ax, ax2) = plt.subplots(1, 2, figsize=(12, 6))
+    else:
+        fig, ax = plt.subplots(figsize=(6, 6))
+
     proj = result.projection.astype(float)
     proj_norm = (proj - proj.min()) / (np.ptp(proj) + 1e-9)
     ax.imshow(proj_norm, cmap="gray")
@@ -107,9 +112,33 @@ def plot_morphology(result: MorphologyResult, out_path: str) -> None:
         title += f", alignment {alignment:.2f}"
     ax.set_title(title)
     ax.axis("off")
+
+    if has_texture_map:
+        _draw_orientation_map(ax2, result.orientation_map, result.coherence_map)
+        st_score = result.summary.get("texture_alignment_score")
+        ax2.set_title(f"Structure-tensor orientation, alignment {st_score:.2f}" if st_score is not None else "Structure-tensor orientation")
+
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
+
+
+def _draw_orientation_map(ax, orientation_map: np.ndarray, coherence_map: np.ndarray) -> None:
+    """HSV-encoded local-orientation map: hue = angle, value = coherence.
+
+    Standard visualization for structure-tensor / OrientationJ-style fiber
+    orientation maps — hue cycles once over the axial [-pi/2, pi/2] range
+    (so opposite-hue colors mean perpendicular, not just "different"), and
+    low-coherence (unreliable / isotropic) regions fade to black instead of
+    showing an arbitrary color.
+    """
+    from matplotlib.colors import hsv_to_rgb
+
+    hue = (orientation_map + np.pi / 2) / np.pi
+    coherence_norm = coherence_map / (coherence_map.max() + 1e-9)
+    hsv = np.stack([hue, np.ones_like(hue), coherence_norm], axis=-1)
+    ax.imshow(hsv_to_rgb(hsv))
+    ax.axis("off")
 
 
 def plot_group_comparison(comparison: dict, out_path: str, max_metrics: int = 12) -> None:

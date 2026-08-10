@@ -19,6 +19,9 @@ Python(FastAPI + OpenCV + scikit-image) 기반으로, Fiji 전체 배포판(수�
   세포는 distance-transform 기반 watershed로 자동 분리됩니다(끌 수도 있음). 세포/구조의 방향
   정렬도(alignment score, 0=무작위 ~ 1=완전 정렬)도 계산합니다 — 2D는 원형 순서 매개변수(circular
   order parameter), 3D는 각 객체의 관성텐서로 구한 주축을 이용한 nematic order parameter를 씁니다.
+  옵션으로 **구조 텐서 기반 정렬도**(Fiji OrientationJ, Cardiotensor와 같은 방식)도 켤 수 있습니다 —
+  세그멘테이션 없이 픽셀/voxel 단위로 국소 방향과 coherence(신뢰도)를 계산하므로, sarcomere 줄무늬나
+  섬유 조직처럼 개별 세포로 나누기 애매한 텍스처의 정렬도를 볼 때 더 적합합니다.
 - **그룹 통계 비교**: 같은 분석을 여러 영상(그룹 A/B, 예: 대조군 vs 처리군)에 대해 돌린 뒤 각
   지표를 Mann-Whitney U 검정으로 비교합니다. 그룹별 평균±표준편차, p-value, 지표별 dot plot을
   제공합니다.
@@ -102,8 +105,11 @@ pytest tests/ -v
 - **맞닿은 세포 분리 (watershed)**: 기본으로 켜져 있지만 `separation_min_distance`(기본 10
   px/voxel, 예상되는 세포 중심 간 최소 거리)를 세포 크기에 맞게 조정해야 정확합니다. 너무 작으면
   세포 하나가 여러 개로 잘못 쪼개지고, 너무 크면 맞닿은 세포가 다시 하나로 합쳐집니다.
-- **정렬도(alignment_score) 자동 검증 안 됨**: 합성 이미지(균일하게 기울어진 타원 vs 무작위
-  방향)로는 검증했지만, 실제 Fiji의 OrientationJ 같은 도구 출력과 나란히 비교한 적은 없습니다.
+- **정렬도(alignment_score, texture_alignment_score) 자동 검증 안 됨**: 합성 이미지(균일하게
+  기울어진 줄무늬/타원 vs 무작위 방향)로는 검증했지만, 실제 Fiji의 OrientationJ 같은 도구 출력과
+  나란히 비교한 적은 없습니다. `texture_alignment_score`(구조 텐서 방식)는 이미지 가장자리에서
+  가우시안 필터의 경계 효과로 값이 부정확할 수 있으니, 관심 영역이 이미지 가장자리에 붙어있다면
+  주의하세요.
 - **그룹 비교는 2그룹만 지원**: 3그룹 이상 비교(예: 대조군/저용량/고용량)나 ANOVA 등은 아직 없고,
   `/api/analyze/compare`는 각 그룹의 모든 영상을 해당 분석의 기본 파라미터로만 돌립니다(영상별로
   `prominence_frac` 등을 따로 맞추려면 단일 분석 엔드포인트로 개별 확인 후 사용하세요). 표본 수가

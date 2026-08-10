@@ -69,6 +69,12 @@ function fieldLabel(key) {
     regression_slope: "회귀 기울기",
     regression_intercept: "회귀 절편",
     regression_r_squared: "회귀 R²",
+    texture_alignment_score: "구조 텐서 정렬도 (0-1)",
+    texture_mean_orientation_deg: "구조 텐서 평균 방향 (도)",
+    texture_mean_coherence: "평균 coherence (0-1)",
+    texture_alignment_score_3d: "구조 텐서 정렬도 3D (0-1)",
+    texture_mean_direction_zyx: "구조 텐서 평균 방향 벡터 (Z,Y,X)",
+    texture_mean_fractional_anisotropy: "평균 비등방성 (FA, 0-1)",
   };
   return labels[key] || key;
 }
