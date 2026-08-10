@@ -15,6 +15,7 @@ import pandas as pd
 from app.analysis import plotting
 from app.analysis.beating import analyze_beating
 from app.analysis.calcium import analyze_calcium
+from app.analysis.colocalization import analyze_colocalization
 from app.analysis.group_stats import compare_groups
 from app.analysis.morphology import analyze_morphology_2d, analyze_morphology_3d
 from app.analysis.validation_stats import compute_agreement
@@ -300,6 +301,40 @@ async def validate_agreement_endpoint(
     plotting.plot_agreement(agreement, label_a, label_b, str(result_dir / "plot.png"))
 
     return {"result_id": result_id, "stats": stats_only, "urls": _urls(result_id, result_dir)}
+
+
+def _load_projection(file: UploadFile):
+    path = _save_upload(file)
+    try:
+        frames, _fps = _load_frames(path, None)
+        return frames.max(axis=0) if frames.ndim == 3 else frames
+    finally:
+        path.unlink(missing_ok=True)
+
+
+@app.post("/api/analyze/colocalization")
+async def analyze_colocalization_endpoint(
+    channel_a_file: UploadFile = File(...),
+    channel_b_file: UploadFile = File(...),
+    label_a: str = Form(default="Channel A"),
+    label_b: str = Form(default="Channel B"),
+):
+    """Two-channel colocalization from a pair of image/video uploads (each
+    reduced to a max-intensity projection, same as morphology's 2D mode)."""
+    projection_a = _load_projection(channel_a_file)
+    projection_b = _load_projection(channel_b_file)
+    try:
+        coloc_stats = analyze_colocalization(projection_a, projection_b)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    result_id, result_dir = _new_result_dir()
+    (result_dir / "summary.json").write_text(json.dumps(coloc_stats, indent=2))
+    plotting.plot_colocalization(
+        projection_a, projection_b, coloc_stats, label_a, label_b, str(result_dir / "plot.png")
+    )
+
+    return {"result_id": result_id, "stats": coloc_stats, "urls": _urls(result_id, result_dir)}
 
 
 # Mounted last so it never shadows the /api/* and /results/* routes above.
