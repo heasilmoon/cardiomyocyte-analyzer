@@ -185,9 +185,14 @@ def plot_group_comparison(comparison: dict, out_path: str, max_metrics: int = 12
         ax.set_xticklabels([label_a, label_b], fontsize=8)
         ax.set_xlim(-0.5, 1.5)
         p = m["p_value"]
-        p_text = f"p={p:.3g}" if p is not None else "p=n/a"
+        p_text = f"MWU p={p:.3g}" if p is not None else "MWU p=n/a"
         sig = " *" if (p is not None and p < 0.05) else ""
-        ax.set_title(f"{m['metric']}\n{p_text}{sig}", fontsize=9)
+        lmm_p = m.get("lmm_p_value")
+        lmm_text = ""
+        if lmm_p is not None:
+            lmm_sig = " *" if lmm_p < 0.05 else ""
+            lmm_text = f"\nLMM p={lmm_p:.3g}{lmm_sig} ({m.get('lmm_n_clusters')} clusters)"
+        ax.set_title(f"{m['metric']}\n{p_text}{sig}{lmm_text}", fontsize=9)
 
     for idx in range(len(metrics), nrows * ncols):
         axes[idx // ncols][idx % ncols].axis("off")
