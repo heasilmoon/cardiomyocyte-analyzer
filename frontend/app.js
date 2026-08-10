@@ -75,6 +75,15 @@ function fieldLabel(key) {
     texture_alignment_score_3d: "구조 텐서 정렬도 3D (0-1)",
     texture_mean_direction_zyx: "구조 텐서 평균 방향 벡터 (Z,Y,X)",
     texture_mean_fractional_anisotropy: "평균 비등방성 (FA, 0-1)",
+    n_pixels: "픽셀 수",
+    manders_overlap_coefficient: "Manders overlap coefficient",
+    manders_m1: "Manders M1",
+    manders_m2: "Manders M2",
+    threshold_a: "채널 A 임계값 (Otsu)",
+    threshold_b: "채널 B 임계값 (Otsu)",
+    fraction_a_positive: "채널 A 양성 픽셀 비율",
+    fraction_b_positive: "채널 B 양성 픽셀 비율",
+    fraction_both_positive: "두 채널 모두 양성인 픽셀 비율",
   };
   return labels[key] || key;
 }
@@ -278,6 +287,54 @@ if (agreementForm) {
       const data = await res.json();
       statusEl.textContent = "완료되었습니다.";
       renderAgreementResults(resultsEl, data);
+    } catch (err) {
+      statusEl.textContent = `오류: ${err.message}`;
+      statusEl.classList.add("error");
+    } finally {
+      submitBtn.disabled = false;
+    }
+  });
+}
+
+function renderColocalizationResults(container, data) {
+  const { stats, urls } = data;
+  const rows = Object.entries(stats)
+    .map(([k, v]) => `<tr><td>${fieldLabel(k)}</td><td>${formatValue(v)}</td></tr>`)
+    .join("");
+
+  container.innerHTML = `
+    ${urls.plot ? `<img src="${API_BASE}${urls.plot}" alt="colocalization plot" />` : ""}
+    <table class="summary">${rows}</table>
+    <div class="links">
+      ${urls.csv ? `<a href="${API_BASE}${urls.csv}" download>CSV 다운로드</a>` : ""}
+      ${urls.summary ? `<a href="${API_BASE}${urls.summary}" download>요약 JSON 다운로드</a>` : ""}
+    </div>
+  `;
+}
+
+const colocalizationForm = document.getElementById("colocalization-form");
+if (colocalizationForm) {
+  colocalizationForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const statusEl = document.getElementById("colocalization-status");
+    const resultsEl = document.getElementById("colocalization-results");
+    const submitBtn = colocalizationForm.querySelector("button[type=submit]");
+
+    const formData = new FormData(colocalizationForm);
+    submitBtn.disabled = true;
+    statusEl.textContent = "Colocalization 분석 중입니다...";
+    statusEl.classList.remove("error");
+    resultsEl.innerHTML = "";
+
+    try {
+      const res = await fetch(`${API_BASE}/api/analyze/colocalization`, { method: "POST", body: formData });
+      if (!res.ok) {
+        const detail = await res.json().catch(() => ({}));
+        throw new Error(detail.detail || `요청 실패 (HTTP ${res.status})`);
+      }
+      const data = await res.json();
+      statusEl.textContent = "완료되었습니다.";
+      renderColocalizationResults(resultsEl, data);
     } catch (err) {
       statusEl.textContent = `오류: ${err.message}`;
       statusEl.classList.add("error");

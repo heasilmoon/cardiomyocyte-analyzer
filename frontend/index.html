@@ -18,6 +18,7 @@
       <button data-tab="morphology">형태 분석 (2D/3D)</button>
       <button data-tab="compare">그룹 비교</button>
       <button data-tab="validate">검증</button>
+      <button data-tab="colocalization">Colocalization</button>
     </nav>
 
     <section id="panel-beating" class="panel active">
@@ -243,6 +244,38 @@
       </form>
       <div class="status" id="agreement-status"></div>
       <div class="results" id="agreement-results"></div>
+    </section>
+
+    <section id="panel-colocalization" class="panel">
+      <p>멀티채널 형광 이미지에서 두 채널이 얼마나 겹치는지(colocalization) 분석합니다. Pearson
+      상관계수, Manders M1/M2(각 채널 신호 중 상대 채널과 겹치는 비율, Otsu 임계값 기준),
+      Manders overlap coefficient를 계산하고, RGB 병합 이미지 + 픽셀 강도 산점도를 만듭니다.
+      각 채널을 mp4나 이미지로 따로 올려주세요 (두 채널은 크기가 같아야 합니다).</p>
+      <form id="colocalization-form">
+        <div class="form-row">
+          <div class="field">
+            <label>채널 A 파일</label>
+            <input type="file" name="channel_a_file" accept="video/*,image/*" required />
+          </div>
+          <div class="field">
+            <label>채널 A 라벨</label>
+            <input type="text" name="label_a" value="Channel A" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label>채널 B 파일</label>
+            <input type="file" name="channel_b_file" accept="video/*,image/*" required />
+          </div>
+          <div class="field">
+            <label>채널 B 라벨</label>
+            <input type="text" name="label_b" value="Channel B" />
+          </div>
+          <button class="primary" type="submit">Colocalization 분석 시작</button>
+        </div>
+      </form>
+      <div class="status" id="colocalization-status"></div>
+      <div class="results" id="colocalization-results"></div>
     </section>
   </main>
   <script src="app.js"></script>

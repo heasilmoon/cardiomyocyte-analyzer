@@ -236,3 +236,47 @@ def plot_agreement(agreement: dict, label_a: str, label_b: str, out_path: str) -
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
+
+
+def plot_colocalization(
+    channel_a: np.ndarray,
+    channel_b: np.ndarray,
+    stats: dict,
+    label_a: str,
+    label_b: str,
+    out_path: str,
+    max_scatter_points: int = 20000,
+) -> None:
+    """Standard colocalization figure: RGB merge (A=red, B=green, overlap=
+    yellow) and the pixel-intensity scatter plot, side by side."""
+
+    def norm(x: np.ndarray) -> np.ndarray:
+        x = x.astype(float)
+        rng = np.ptp(x)
+        return (x - x.min()) / rng if rng > 0 else np.zeros_like(x)
+
+    a_norm, b_norm = norm(channel_a), norm(channel_b)
+    merge = np.zeros((*a_norm.shape, 3))
+    merge[..., 0] = a_norm
+    merge[..., 1] = b_norm
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4.8))
+    ax1.imshow(merge)
+    ax1.set_title(f"{label_a} (red) / {label_b} (green) merge", fontsize=10)
+    ax1.axis("off")
+
+    a_flat, b_flat = channel_a.flatten().astype(float), channel_b.flatten().astype(float)
+    if len(a_flat) > max_scatter_points:
+        rng = np.random.default_rng(0)
+        idx = rng.choice(len(a_flat), max_scatter_points, replace=False)
+        a_flat, b_flat = a_flat[idx], b_flat[idx]
+    ax2.scatter(a_flat, b_flat, s=2, alpha=0.25, color="#3498db")
+    ax2.set_xlabel(f"{label_a} intensity")
+    ax2.set_ylabel(f"{label_b} intensity")
+    r = stats["pearson_r"]
+    m1, m2 = stats["manders_m1"], stats["manders_m2"]
+    ax2.set_title(f"r={r:.3f}, M1={m1:.3f}, M2={m2:.3f}", fontsize=10)
+
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
