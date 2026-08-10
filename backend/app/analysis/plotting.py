@@ -166,3 +166,44 @@ def plot_group_comparison(comparison: dict, out_path: str, max_metrics: int = 12
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
+
+
+def plot_agreement(agreement: dict, label_a: str, label_b: str, out_path: str) -> None:
+    """Two-panel method-agreement figure: scatter (with identity + regression
+    lines) and Bland-Altman, the standard pairing for a validation-study
+    figure in the biomedical literature."""
+    a = np.array(agreement["values_a"])
+    b = np.array(agreement["values_b"])
+    diffs = np.array(agreement["diffs"])
+    means = np.array(agreement["means"])
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4.5))
+
+    lo = min(a.min(), b.min())
+    hi = max(a.max(), b.max())
+    pad = (hi - lo) * 0.08 if hi > lo else 1.0
+    ax1.plot([lo - pad, hi + pad], [lo - pad, hi + pad], "--", color="#999999", linewidth=1, label="y = x")
+    xs = np.linspace(lo - pad, hi + pad, 50)
+    ys = agreement["regression_slope"] * xs + agreement["regression_intercept"]
+    ax1.plot(xs, ys, "-", color="#e67e22", linewidth=1.5, label="regression")
+    ax1.scatter(a, b, color="#3498db", alpha=0.75, s=25, zorder=3)
+    ax1.set_xlabel(label_a)
+    ax1.set_ylabel(label_b)
+    ax1.set_title(f"r={agreement['pearson_r']:.3f}, ICC={agreement['icc_2_1']:.3f}, n={agreement['n']}", fontsize=10)
+    ax1.legend(loc="upper left", fontsize=8)
+
+    bias = agreement["bland_altman_bias"]
+    loa_lower = agreement["bland_altman_loa_lower"]
+    loa_upper = agreement["bland_altman_loa_upper"]
+    ax2.scatter(means, diffs, color="#3498db", alpha=0.75, s=25, zorder=3)
+    ax2.axhline(bias, color="#2c3e50", linewidth=1.5, label=f"bias = {bias:.3g}")
+    ax2.axhline(loa_upper, color="#c0392b", linestyle="--", linewidth=1.2, label="95% LoA")
+    ax2.axhline(loa_lower, color="#c0392b", linestyle="--", linewidth=1.2)
+    ax2.set_xlabel(f"Mean of {label_a} & {label_b}")
+    ax2.set_ylabel(f"{label_a} − {label_b}")
+    ax2.set_title("Bland-Altman", fontsize=10)
+    ax2.legend(loc="upper right", fontsize=8)
+
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)

@@ -17,6 +17,7 @@
       <button data-tab="calcium">칼슘 이미징</button>
       <button data-tab="morphology">형태 분석 (2D/3D)</button>
       <button data-tab="compare">그룹 비교</button>
+      <button data-tab="validate">검증</button>
     </nav>
 
     <section id="panel-beating" class="panel active">
@@ -165,6 +166,74 @@
       </form>
       <div class="status"></div>
       <div class="results"></div>
+    </section>
+
+    <section id="panel-validate" class="panel">
+      <h3 style="margin-top:0;">1단계 &mdash; 배치 분석</h3>
+      <p>같은 분석 종류의 영상을 여러 개 한 번에 올려서, 영상별 결과가 담긴 CSV를 받습니다.
+      이 CSV의 값과 Fiji로 따로 뽑은 값을 나란히 놓으면 2단계 일치도 분석에 쓸 수 있어요.</p>
+      <form id="batch-form">
+        <div class="form-row">
+          <div class="field">
+            <label>분석 종류</label>
+            <select name="analysis_type" id="batch-analysis-type">
+              <option value="beating">박동</option>
+              <option value="calcium">칼슘 이미징</option>
+              <option value="morphology">형태 (2D/3D)</option>
+            </select>
+          </div>
+          <div class="field" id="batch-morphology-mode-field" style="display:none;">
+            <label>형태 분석 모드</label>
+            <select name="morphology_mode">
+              <option value="2d">2D</option>
+              <option value="3d">3D</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>영상 파일 (여러 개 선택)</label>
+            <input type="file" name="files" accept="video/*" multiple required />
+          </div>
+          <button class="primary" type="submit">배치 분석 시작</button>
+        </div>
+      </form>
+      <div class="status" id="batch-status"></div>
+      <div class="results" id="batch-results"></div>
+
+      <hr style="margin: 2rem 0; border: none; border-top: 1px solid var(--border);" />
+
+      <h3>2단계 &mdash; 일치도(Agreement) 분석</h3>
+      <p>이 도구의 값과 Fiji(또는 다른 기준 방법) 값이 짝지어진 CSV를 올리면, 상관계수·ICC(2,1)·
+      Bland-Altman bias 및 95% 일치 한계를 계산하고 논문용 그림을 만들어줍니다. CSV에는 각 영상당
+      한 행, 두 개의 숫자 열(이 도구 값, Fiji 값)이 있어야 합니다.</p>
+      <form id="agreement-form">
+        <div class="form-row">
+          <div class="field">
+            <label>CSV 파일</label>
+            <input type="file" name="file" accept=".csv" required />
+          </div>
+          <div class="field">
+            <label>이 도구 값 열 이름</label>
+            <input type="text" name="column_a" placeholder="예: my_bpm" required />
+          </div>
+          <div class="field">
+            <label>Fiji 값 열 이름</label>
+            <input type="text" name="column_b" placeholder="예: fiji_bpm" required />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label>이 도구 라벨</label>
+            <input type="text" name="label_a" value="This tool" />
+          </div>
+          <div class="field">
+            <label>Fiji 라벨</label>
+            <input type="text" name="label_b" value="Fiji" />
+          </div>
+          <button class="primary" type="submit">일치도 분석 시작</button>
+        </div>
+      </form>
+      <div class="status" id="agreement-status"></div>
+      <div class="results" id="agreement-results"></div>
     </section>
   </main>
   <script src="app.js"></script>

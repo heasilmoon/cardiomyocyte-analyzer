@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import uuid
 from pathlib import Path
@@ -16,6 +17,7 @@ from app.analysis.beating import analyze_beating
 from app.analysis.calcium import analyze_calcium
 from app.analysis.group_stats import compare_groups
 from app.analysis.morphology import analyze_morphology_2d, analyze_morphology_3d
+from app.analysis.validation_stats import compute_agreement
 from app.config import FRONTEND_DIR, MAX_FRAMES, MAX_UPLOAD_BYTES, RESULTS_DIR, UPLOADS_DIR
 from app.utils.video_io import VideoLoadError, read_video_frames
 
@@ -199,6 +201,29 @@ async def _summarize_group(files: list[UploadFile], analysis_type: str, morpholo
     return summaries
 
 
+@app.post("/api/analyze/batch")
+async def analyze_batch_endpoint(
+    analysis_type: Literal["beating", "calcium", "morphology"] = Form(...),
+    morphology_mode: Literal["2d", "3d"] = Form(default="2d"),
+    files: list[UploadFile] = File(...),
+):
+    """Run one analysis over many videos and return a single combined CSV.
+
+    Meant for quickly generating this tool's values across an entire real
+    dataset (e.g. every recording in a validation study), one row per video.
+    """
+    if not files:
+        raise HTTPException(status_code=400, detail="At least one video file is required")
+
+    summaries = await _summarize_group(files, analysis_type, morphology_mode)
+
+    result_id, result_dir = _new_result_dir()
+    pd.DataFrame(summaries).to_csv(result_dir / "data.csv", index=False)
+    (result_dir / "summary.json").write_text(json.dumps(summaries, indent=2))
+
+    return {"result_id": result_id, "n_videos": len(summaries), "summaries": summaries, "urls": _urls(result_id, result_dir)}
+
+
 @app.post("/api/analyze/compare")
 async def analyze_compare_endpoint(
     analysis_type: Literal["beating", "calcium", "morphology"] = Form(...),
@@ -226,6 +251,52 @@ async def analyze_compare_endpoint(
     plotting.plot_group_comparison(comparison, str(result_dir / "plot.png"))
 
     return {"result_id": result_id, "comparison": comparison, "urls": _urls(result_id, result_dir)}
+
+
+@app.post("/api/validate/agreement")
+async def validate_agreement_endpoint(
+    file: UploadFile = File(...),
+    column_a: str = Form(...),
+    column_b: str = Form(...),
+    label_a: str = Form(default="This tool"),
+    label_b: str = Form(default="Reference method"),
+):
+    """Method-agreement analysis from a CSV of paired (this-tool, reference)
+    values — e.g. one row per video, one column from this tool's batch
+    output and one column of matching Fiji/MUSCLEMOTION values."""
+    content = await file.read()
+    try:
+        df = pd.read_csv(io.BytesIO(content))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Could not parse CSV: {exc}") from exc
+
+    for col in (column_a, column_b):
+        if col not in df.columns:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Column '{col}' not found in CSV. Available columns: {list(df.columns)}",
+            )
+
+    paired = df[[column_a, column_b]].apply(pd.to_numeric, errors="coerce").dropna()
+    try:
+        agreement = compute_agreement(paired[column_a].tolist(), paired[column_b].tolist())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    result_id, result_dir = _new_result_dir()
+    pd.DataFrame(
+        {
+            column_a: agreement["values_a"],
+            column_b: agreement["values_b"],
+            "diff": agreement["diffs"],
+            "mean": agreement["means"],
+        }
+    ).to_csv(result_dir / "data.csv", index=False)
+    stats_only = {k: v for k, v in agreement.items() if k not in ("values_a", "values_b", "diffs", "means")}
+    (result_dir / "summary.json").write_text(json.dumps(stats_only, indent=2))
+    plotting.plot_agreement(agreement, label_a, label_b, str(result_dir / "plot.png"))
+
+    return {"result_id": result_id, "stats": stats_only, "urls": _urls(result_id, result_dir)}
 
 
 # Mounted last so it never shadows the /api/* and /results/* routes above.
