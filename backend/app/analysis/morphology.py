@@ -31,6 +31,9 @@ from skimage.measure import label, regionprops, regionprops_table
 from skimage.morphology import remove_small_objects
 from skimage.segmentation import watershed
 
+from app.analysis.alignment_stats import circular_alignment_2d, nematic_alignment_3d
+from app.analysis.structure_tensor import structure_tensor_alignment_2d, structure_tensor_alignment_3d
+
 
 @dataclass
 class MorphologyResult:
@@ -40,6 +43,8 @@ class MorphologyResult:
     projection: np.ndarray
     label_image: np.ndarray
     summary: dict = field(default_factory=dict)
+    orientation_map: np.ndarray | None = None
+    coherence_map: np.ndarray | None = None
 
 
 def _segment(
@@ -92,23 +97,6 @@ def _segment(
     return watershed(-distance, markers, mask=binary)
 
 
-def _circular_alignment_2d(orientations_rad: np.ndarray) -> tuple[float | None, float | None]:
-    """Population alignment score for axial (mod-pi) 2D orientation angles.
-
-    Doubling the angle maps the axial [-pi/2, pi/2] range onto a full circle
-    so the usual circular mean / resultant length works (a cell pointing at
-    +85 deg and one at -85 deg are nearly parallel, not opposite). Returns
-    (alignment_score in [0,1], mean_orientation_deg); 1 = perfectly aligned,
-    0 = uniformly random orientation.
-    """
-    if len(orientations_rad) < 2:
-        return None, None
-    resultant = np.mean(np.exp(2j * orientations_rad))
-    alignment_score = float(np.abs(resultant))
-    mean_orientation_deg = float(np.degrees(0.5 * np.angle(resultant)))
-    return alignment_score, mean_orientation_deg
-
-
 def _principal_axis_3d(inertia_tensor: np.ndarray) -> np.ndarray:
     """Unit vector along an object's long axis from its inertia tensor.
 
@@ -120,32 +108,12 @@ def _principal_axis_3d(inertia_tensor: np.ndarray) -> np.ndarray:
     return eigvecs[:, 0]
 
 
-def _nematic_alignment_3d(directions: np.ndarray) -> tuple[float | None, np.ndarray | None]:
-    """Population alignment score for 3D axes (headless unit vectors).
-
-    Standard nematic order-parameter construction (liquid-crystal / fiber
-    alignment literature): Q = mean(3 n(x)n - I) / 2 is invariant to n -> -n,
-    so it handles the sign ambiguity of a "long axis" correctly. Its largest
-    eigenvalue S in [0,1] is the alignment score (0 = isotropic/random,
-    1 = perfectly aligned) and the matching eigenvector is the mean
-    alignment direction.
-    """
-    if len(directions) < 2:
-        return None, None
-    q_tensors = [3.0 * np.outer(n, n) - np.eye(3) for n in directions]
-    q_mean = np.mean(q_tensors, axis=0) / 2.0
-    eigvals, eigvecs = np.linalg.eigh(q_mean)
-    order = np.argsort(eigvals)[::-1]
-    s = float(max(eigvals[order[0]], 0.0))
-    director = eigvecs[:, order[0]]
-    return s, director
-
-
 def analyze_morphology_2d(
     frames: np.ndarray,
     min_object_px: int = 30,
     separate_touching: bool = True,
     separation_min_distance: int = 10,
+    compute_texture_alignment: bool = False,
 ) -> MorphologyResult:
     projection = frames.max(axis=0) if frames.ndim == 3 else frames
     label_image = _segment(
@@ -173,7 +141,7 @@ def analyze_morphology_2d(
         objects_df["orientation_deg"] = np.degrees(objects_df["orientation"])
 
     alignment_score, mean_orientation_deg = (
-        _circular_alignment_2d(objects_df["orientation"].to_numpy()) if len(objects_df) else (None, None)
+        circular_alignment_2d(objects_df["orientation"].to_numpy()) if len(objects_df) else (None, None)
     )
 
     summary = {
@@ -189,6 +157,16 @@ def analyze_morphology_2d(
     if summary["image_area_px"]:
         summary["coverage_fraction"] = summary["total_covered_area_px"] / summary["image_area_px"]
 
+    orientation_map = None
+    coherence_map = None
+    if compute_texture_alignment:
+        texture = structure_tensor_alignment_2d(projection)
+        orientation_map = texture["orientation_map"]
+        coherence_map = texture["coherence_map"]
+        summary["texture_alignment_score"] = texture["alignment_score"]
+        summary["texture_mean_orientation_deg"] = texture["mean_orientation_deg"]
+        summary["texture_mean_coherence"] = texture["mean_coherence"]
+
     return MorphologyResult(
         mode="2d",
         n_objects=int(objects_df.shape[0]),
@@ -196,6 +174,8 @@ def analyze_morphology_2d(
         projection=projection,
         label_image=label_image,
         summary=summary,
+        orientation_map=orientation_map,
+        coherence_map=coherence_map,
     )
 
 
@@ -204,6 +184,8 @@ def analyze_morphology_3d(
     min_object_voxels: int = 100,
     separate_touching: bool = True,
     separation_min_distance: int = 10,
+    compute_texture_alignment: bool = False,
+    texture_stride: int = 2,
 ) -> MorphologyResult:
     """frames: (Z, H, W) grayscale stack, one z-slice per frame."""
     volume = frames
@@ -233,7 +215,7 @@ def analyze_morphology_3d(
         )
     objects_df = pd.DataFrame(rows)
 
-    alignment_score, director = _nematic_alignment_3d(np.array(directions)) if directions else (None, None)
+    alignment_score, director = nematic_alignment_3d(np.array(directions)) if directions else (None, None)
 
     summary = {
         "n_objects": int(objects_df.shape[0]),
@@ -244,6 +226,12 @@ def analyze_morphology_3d(
         "alignment_score_3d": alignment_score,
         "mean_direction_zyx": [float(v) for v in director] if director is not None else None,
     }
+
+    if compute_texture_alignment:
+        texture = structure_tensor_alignment_3d(volume, stride=texture_stride)
+        summary["texture_alignment_score_3d"] = texture["alignment_score_3d"]
+        summary["texture_mean_direction_zyx"] = texture["mean_direction_zyx"]
+        summary["texture_mean_fractional_anisotropy"] = texture["mean_fractional_anisotropy"]
 
     projection = volume.max(axis=0)
     label_projection = label_volume.max(axis=0)

@@ -149,6 +149,7 @@ async def analyze_morphology_endpoint(
     min_object_size: int = Form(default=30),
     separate_touching: bool = Form(default=True),
     separation_min_distance: int = Form(default=10),
+    compute_texture_alignment: bool = Form(default=False),
 ):
     upload_path = _save_upload(file)
     try:
@@ -159,6 +160,7 @@ async def analyze_morphology_endpoint(
                 min_object_px=min_object_size,
                 separate_touching=separate_touching,
                 separation_min_distance=separation_min_distance,
+                compute_texture_alignment=compute_texture_alignment,
             )
         else:
             result = analyze_morphology_3d(
@@ -166,6 +168,7 @@ async def analyze_morphology_endpoint(
                 min_object_voxels=min_object_size,
                 separate_touching=separate_touching,
                 separation_min_distance=separation_min_distance,
+                compute_texture_alignment=compute_texture_alignment,
             )
     finally:
         upload_path.unlink(missing_ok=True)

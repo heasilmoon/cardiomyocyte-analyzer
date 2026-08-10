@@ -85,7 +85,9 @@
     </section>
 
     <section id="panel-morphology" class="panel">
-      <p>2D: 대표 이미지(최대 강도 투영)에서 세포를 분할해 개수/면적 등을 계산합니다. 3D: 영상의 각 프레임을 z-slice로 간주해 부피 기반 형태를 계산합니다.</p>
+      <p>2D: 대표 이미지(최대 강도 투영)에서 세포를 분할해 개수/면적 등을 계산합니다. 3D: 영상의 각 프레임을 z-slice로 간주해 부피 기반 형태를 계산합니다.
+      "구조 텐서 정렬도"를 켜면 세그멘테이션 없이 픽셀(voxel) 단위로 국소 방향을 계산합니다 (Cardiotensor/OrientationJ
+      방식) — sarcomere 줄무늬나 섬유 조직처럼 개별 세포로 나누기 애매한 구조의 정렬도를 볼 때 유용합니다.</p>
       <form data-endpoint="/api/analyze/morphology">
         <div class="form-row">
           <div class="field">
@@ -113,6 +115,13 @@
           <div class="field">
             <label>세포 간 최소 간격 (px/voxel)</label>
             <input type="number" name="separation_min_distance" value="10" />
+          </div>
+          <div class="field">
+            <label>구조 텐서 정렬도 (픽셀 단위)</label>
+            <select name="compute_texture_alignment">
+              <option value="false">끄기 (기본)</option>
+              <option value="true">켜기</option>
+            </select>
           </div>
           <button class="primary" type="submit">분석 시작</button>
         </div>
