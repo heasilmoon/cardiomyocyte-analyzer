@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import uuid
 from pathlib import Path
 from typing import Literal
@@ -228,6 +229,28 @@ async def analyze_batch_endpoint(
     return {"result_id": result_id, "n_videos": len(summaries), "summaries": summaries, "urls": _urls(result_id, result_dir)}
 
 
+def _parse_batch_labels(text: str | None, expected_count: int, field_name: str) -> list[str] | None:
+    """Parse an optional newline/comma-separated batch (cluster) label list.
+
+    One label per uploaded file, same order as the uploads. Used to fit the
+    cluster-aware linear mixed-effects model in compare_groups instead of
+    treating every video as an independent replicate — see group_stats.py.
+    Returns None (no clustering) when the field is left blank.
+    """
+    if text is None or not text.strip():
+        return None
+    labels = [part.strip() for part in re.split(r"[\n,]+", text) if part.strip()]
+    if len(labels) != expected_count:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"{field_name}: expected {expected_count} batch/sample labels (one per uploaded file, "
+                f"same order), got {len(labels)}"
+            ),
+        )
+    return labels
+
+
 @app.post("/api/analyze/compare")
 async def analyze_compare_endpoint(
     analysis_type: Literal["beating", "calcium", "morphology"] = Form(...),
@@ -236,13 +259,20 @@ async def analyze_compare_endpoint(
     group_b_label: str = Form(default="Group B"),
     group_a_files: list[UploadFile] = File(...),
     group_b_files: list[UploadFile] = File(...),
+    group_a_batches: str | None = Form(default=None),
+    group_b_batches: str | None = Form(default=None),
 ):
     if not group_a_files or not group_b_files:
         raise HTTPException(status_code=400, detail="Both groups need at least one video file")
 
+    clusters_a = _parse_batch_labels(group_a_batches, len(group_a_files), "group_a_batches")
+    clusters_b = _parse_batch_labels(group_b_batches, len(group_b_files), "group_b_batches")
+
     summaries_a = await _summarize_group(group_a_files, analysis_type, morphology_mode)
     summaries_b = await _summarize_group(group_b_files, analysis_type, morphology_mode)
-    comparison = compare_groups(summaries_a, summaries_b, group_a_label, group_b_label)
+    comparison = compare_groups(
+        summaries_a, summaries_b, group_a_label, group_b_label, clusters_a=clusters_a, clusters_b=clusters_b
+    )
 
     result_id, result_dir = _new_result_dir()
     for s in summaries_a:

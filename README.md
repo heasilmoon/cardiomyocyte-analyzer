@@ -24,7 +24,11 @@ Python(FastAPI + OpenCV + scikit-image) 기반으로, Fiji 전체 배포판(수�
   섬유 조직처럼 개별 세포로 나누기 애매한 텍스처의 정렬도를 볼 때 더 적합합니다.
 - **그룹 통계 비교**: 같은 분석을 여러 영상(그룹 A/B, 예: 대조군 vs 처리군)에 대해 돌린 뒤 각
   지표를 Mann-Whitney U 검정으로 비교합니다. 그룹별 평균±표준편차, p-value, 지표별 dot plot을
-  제공합니다.
+  제공합니다. 한 샘플(배치/웰)에서 여러 영상을 찍은 경우, 파일 순서대로 배치/샘플 라벨을 넣으면
+  **선형 혼합효과 모델(LMM, `value ~ group + (1|sample)`)**로 샘플 ID를 랜덤효과로 넣어 계산한
+  p-value도 함께 제공합니다 — 같은 샘플의 여러 측정을 독립 표본처럼 취급했을 때 생기는
+  pseudoreplication(거짓양성 증가) 문제를 보정합니다. Lee et al., *Circulation Research*, 2025의
+  통계 방법(R `lmerTest`, REML, 랜덤 절편)과 같은 접근입니다.
 - **Colocalization 분석**: 멀티채널 형광 이미지 두 장(또는 영상의 최대 강도 투영)에서 Pearson
   상관계수, Manders M1/M2(각 채널 신호가 상대 채널과 겹치는 비율, Otsu 임계값 기준), Manders
   overlap coefficient를 계산합니다. RGB 병합 이미지 + 픽셀 강도 산점도를 함께 제공합니다.
@@ -66,7 +70,7 @@ docker run -p 8000:8000 cardiomyocyte-analyzer
 | `POST /api/analyze/beating` | `file`(mp4), `fps_override`, `min_bpm_gap`(선택, 비우면 자동 추정), `prominence_frac`, `signal_mode`(`reference`/`consecutive`), `reference_index` |
 | `POST /api/analyze/calcium` | `file`(mp4), `fps_override`, `min_transients_per_min`, `prominence_frac` |
 | `POST /api/analyze/morphology` | `file`(mp4), `mode`(`2d`/`3d`), `min_object_size`, `separate_touching`, `separation_min_distance`, `compute_texture_alignment` |
-| `POST /api/analyze/compare` | `analysis_type`(`beating`/`calcium`/`morphology`), `morphology_mode`, `group_a_label`, `group_b_label`, `group_a_files`(다중), `group_b_files`(다중) |
+| `POST /api/analyze/compare` | `analysis_type`(`beating`/`calcium`/`morphology`), `morphology_mode`, `group_a_label`, `group_b_label`, `group_a_files`(다중), `group_b_files`(다중), `group_a_batches`(선택, 줄바꿈/쉼표로 구분된 배치 라벨), `group_b_batches` |
 | `POST /api/analyze/batch` | `analysis_type`, `morphology_mode`, `files`(다중) — 영상별 결과를 CSV 하나로 |
 | `POST /api/analyze/colocalization` | `channel_a_file`, `channel_b_file`, `label_a`, `label_b` |
 | `POST /api/validate/agreement` | `file`(CSV), `column_a`, `column_b`, `label_a`, `label_b` |
@@ -121,6 +125,10 @@ pytest tests/ -v
   `prominence_frac` 등을 따로 맞추려면 단일 분석 엔드포인트로 개별 확인 후 사용하세요). 표본 수가
   적을 때(그룹당 3개 이하) Mann-Whitney U의 최소 p-value는 통계적으로 0.05 근처에서 막혀 "유의미한
   차이"를 통계적으로 확정하기 어려울 수 있습니다.
+- **LMM은 클러스터(샘플) 수가 적으면 불안정할 수 있습니다**: `lmm_converged`가 `True`여도 분산
+  성분 추정이 경계값(0)에 가까우면 statsmodels가 ConvergenceWarning을 낼 수 있습니다 — 클러스터가
+  양쪽 그룹 합쳐 6개 미만이면 LMM 결과보다 Mann-Whitney U를 우선 참고하고, 가능하면 클러스터(샘플)
+  수를 늘리세요.
 - **3D 해석**: "3D mp4"는 실제로는 z-slice 순서로 인코딩된 프레임 시퀀스라고 가정합니다. 실제
   현미경 장비가 다른 방식으로 3D 데이터를 mp4에 담는다면 `read_video_frames` 사용 부분을
   조정해야 할 수 있습니다.
