@@ -36,6 +36,8 @@ function fieldLabel(key) {
     mean_relaxation_time_s: "평균 이완 시간 (s)",
     mean_max_contraction_velocity: "평균 최대 수축 속도 (/s)",
     mean_max_relaxation_velocity: "평균 최대 이완 속도 (/s)",
+    piv_median_window_std: "PIV 윈도우별 명암 표준편차 중앙값 (텍스처 지표)",
+    piv_low_texture_warning: "PIV 텍스처 부족 경고",
     n_transients: "트랜지언트 수",
     mean_frequency_per_min: "평균 빈도 (회/분)",
     mean_inter_peak_interval_s: "평균 피크 간격 (s)",
@@ -100,7 +102,17 @@ function renderResults(container, data) {
     .map(([k, v]) => `<tr><td>${fieldLabel(k)}</td><td>${formatValue(v)}</td></tr>`)
     .join("");
 
+  const pivWarning = summary.piv_low_texture_warning
+    ? `<div class="warning-banner">
+        ⚠️ PIV 텍스처 부족 경고: 이 영상은 세포 표면의 명암 무늬(텍스처)가 부족해
+        PIV(입자영상유속계) 분석 결과가 신뢰하기 어려울 수 있습니다.
+        영상에 뚜렷한 반점/알갱이 무늬가 없다면 reference 또는 consecutive
+        모드를 사용하는 것을 권장합니다.
+      </div>`
+    : "";
+
   container.innerHTML = `
+    ${pivWarning}
     ${urls.plot ? `<img src="${API_BASE}${urls.plot}" alt="result plot" />` : ""}
     <table class="summary">${rows}</table>
     <div class="links">
@@ -108,6 +120,16 @@ function renderResults(container, data) {
       ${urls.summary ? `<a href="${API_BASE}${urls.summary}" download>요약 JSON 다운로드</a>` : ""}
     </div>
   `;
+}
+
+const beatingSignalMode = document.getElementById("beating-signal-mode");
+const beatingPivFields = document.getElementById("beating-piv-fields");
+if (beatingSignalMode) {
+  const syncPivFieldsVisibility = () => {
+    beatingPivFields.style.display = beatingSignalMode.value === "piv" ? "" : "none";
+  };
+  beatingSignalMode.addEventListener("change", syncPivFieldsVisibility);
+  syncPivFieldsVisibility();
 }
 
 const compareAnalysisType = document.getElementById("compare-analysis-type");
