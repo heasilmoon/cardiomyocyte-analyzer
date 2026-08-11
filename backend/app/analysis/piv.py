@@ -34,6 +34,20 @@ from numpy.lib.stride_tricks import sliding_window_view
 LOW_TEXTURE_MEDIAN_STD_THRESHOLD = 3.0
 
 
+def _window_stds(frame: np.ndarray, window_size: int = 32, step: int | None = None) -> np.ndarray:
+    """Per-interrogation-window intensity standard deviation, shaped (n_rows, n_cols)."""
+    if step is None:
+        step = window_size // 2
+    h, w = frame.shape
+    ys = list(range(0, h - window_size + 1, step))
+    xs = list(range(0, w - window_size + 1, step))
+    if not ys or not xs:
+        return np.zeros((0, 0))
+    a = frame.astype(np.float64)
+    windows = sliding_window_view(a, (window_size, window_size))[np.ix_(ys, xs)]
+    return windows.std(axis=(-2, -1))
+
+
 def assess_texture(frame: np.ndarray, window_size: int = 32, step: int | None = None) -> dict:
     """Check whether a frame has enough local intensity variation for PIV.
 
@@ -47,20 +61,28 @@ def assess_texture(frame: np.ndarray, window_size: int = 32, step: int | None = 
     median across all windows, plus whether it falls below an empirically
     calibrated low-texture threshold.
     """
-    if step is None:
-        step = window_size // 2
-    h, w = frame.shape
-    a = frame.astype(np.float64)
-    stds = [
-        float(a[y : y + window_size, x : x + window_size].std())
-        for y in range(0, h - window_size + 1, step)
-        for x in range(0, w - window_size + 1, step)
-    ]
-    median_std = float(np.median(stds)) if stds else 0.0
+    stds = _window_stds(frame, window_size, step)
+    median_std = float(np.median(stds)) if stds.size else 0.0
     return {
         "median_window_std": median_std,
         "low_texture": median_std < LOW_TEXTURE_MEDIAN_STD_THRESHOLD,
     }
+
+
+def compute_window_texture_mask(frame: np.ndarray, window_size: int = 32, step: int | None = None) -> np.ndarray:
+    """Boolean mask (n_rows, n_cols), True where a window has usable texture for PIV.
+
+    Same per-window std computation and threshold as assess_texture, but
+    returns the full per-window grid rather than a single summary — this is
+    what compute_piv_motion_signal uses to exclude untextured windows (e.g.
+    the dark, low-contrast core of a thick 3D organoid, or plain background)
+    from the motion signal, rather than letting their essentially-random
+    displacement estimates dilute the true beat signal. Mirrors the
+    "masking the dark/core region" noise-reduction strategy described for
+    PIV-MyoMonitor (Lee et al., 2024, Front. Bioeng. Biotechnol.).
+    """
+    stds = _window_stds(frame, window_size, step)
+    return stds >= LOW_TEXTURE_MEDIAN_STD_THRESHOLD
 
 
 def _gaussian_subpixel(corr: np.ndarray, py: int, px: int) -> tuple[float, float]:
@@ -171,6 +193,7 @@ def compute_piv_motion_signal(
     frames: np.ndarray,
     window_size: int = 32,
     step: int | None = None,
+    texture_mask: np.ndarray | None = None,
 ) -> np.ndarray:
     """Per-frame-transition scalar motion signal for beat detection.
 
@@ -179,11 +202,25 @@ def compute_piv_motion_signal(
     value per consecutive frame pair) — a richer, vector-field-derived
     analogue of the plain pixel-difference signal used by the default
     beating-analysis mode.
+
+    texture_mask: optional boolean grid (n_rows, n_cols), same shape as a
+    compute_piv_field() field, from compute_window_texture_mask(). When
+    given, windows outside the mask (insufficient texture — see
+    compute_window_texture_mask) are excluded from the per-frame mean so
+    their near-random displacement estimates don't dilute the true beat
+    signal. If the mask excludes every window (nothing in the frame has
+    usable texture), it's ignored for that frame pair and all windows are
+    used — a silently all-zero signal would be a worse failure mode than a
+    noisy one, and assess_texture()'s low-texture warning is what's meant
+    to surface this case to the caller instead.
     """
     n = frames.shape[0]
     signal = np.zeros(max(n - 1, 0))
+    use_mask = texture_mask is not None and texture_mask.any()
     for i in range(n - 1):
         field = compute_piv_field(frames[i], frames[i + 1], window_size=window_size, step=step)
         magnitude = np.sqrt(field["u"] ** 2 + field["v"] ** 2)
-        signal[i] = float(np.mean(magnitude))
+        if use_mask:
+            magnitude = magnitude[texture_mask]
+        signal[i] = float(np.mean(magnitude)) if magnitude.size else 0.0
     return signal

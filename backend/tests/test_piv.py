@@ -1,7 +1,12 @@
 import numpy as np
 from scipy import ndimage as ndi
 
-from app.analysis.piv import assess_texture, compute_piv_field, compute_piv_motion_signal
+from app.analysis.piv import (
+    assess_texture,
+    compute_piv_field,
+    compute_piv_motion_signal,
+    compute_window_texture_mask,
+)
 
 
 def _speckle_image(size=200, seed=0, sigma=1.0):
@@ -89,3 +94,52 @@ def test_assess_texture_does_not_flag_speckled_frame():
     result = assess_texture(frame, window_size=32, step=16)
     assert result["median_window_std"] > 3.0
     assert result["low_texture"] is False
+
+
+def test_compute_window_texture_mask_flags_flat_half_and_not_speckled_half():
+    frame = _speckle_image(size=64)
+    frame = frame.copy()
+    frame[:, :32] = 100.0  # left half flat/untextured, right half speckle
+    mask = compute_window_texture_mask(frame, window_size=32, step=32)
+    assert mask.shape == (2, 2)
+    assert not mask[:, 0].any()  # left column of windows: flat -> masked out
+    assert mask[:, 1].all()  # right column: speckle -> kept
+
+
+def test_compute_piv_motion_signal_masks_out_flat_region_noise():
+    # A frame where only the left half has real periodic motion (speckle
+    # shifting) and the right half is flat/static — without masking, the
+    # flat half's near-zero-correlation-peak noise dilutes the true signal
+    # from the moving half; with masking, only the moving half counts.
+    base = _speckle_image(size=64)
+    fps = 30.0
+    n_frames = 60
+    frames = np.zeros((n_frames, 64, 64), dtype=np.uint8)
+    for i in range(n_frames):
+        t = i / fps
+        shift_amount = 3.0 * max(0.0, np.sin(2 * np.pi * 1.0 * t))
+        shifted = ndi.shift(base, shift=(0, shift_amount), mode="reflect", order=3)
+        combined = shifted.copy()
+        combined[:, 32:] = 100.0  # right half stays flat/untextured throughout
+        frames[i] = np.clip(combined, 0, 255).astype(np.uint8)
+
+    mask = compute_window_texture_mask(frames[0], window_size=32, step=32)
+    masked_signal = compute_piv_motion_signal(frames, window_size=32, step=32, texture_mask=mask)
+    unmasked_signal = compute_piv_motion_signal(frames, window_size=32, step=32, texture_mask=None)
+
+    # The masked signal (real motion only) should show a clearer peak-to-mean
+    # ratio than the unmasked one, which is diluted/noised by the flat half.
+    masked_ratio = masked_signal.max() / (masked_signal.mean() + 1e-9)
+    unmasked_ratio = unmasked_signal.max() / (unmasked_signal.mean() + 1e-9)
+    assert masked_ratio >= unmasked_ratio
+
+
+def test_compute_piv_motion_signal_falls_back_to_unmasked_when_mask_is_all_false():
+    base = _speckle_image(size=64)
+    frames = np.stack([base] * 5, axis=0).astype(np.uint8)
+    all_false_mask = np.zeros((2, 2), dtype=bool)
+    signal_with_empty_mask = compute_piv_motion_signal(
+        frames, window_size=32, step=32, texture_mask=all_false_mask
+    )
+    signal_without_mask = compute_piv_motion_signal(frames, window_size=32, step=32, texture_mask=None)
+    assert np.allclose(signal_with_empty_mask, signal_without_mask)

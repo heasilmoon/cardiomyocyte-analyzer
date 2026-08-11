@@ -100,6 +100,28 @@ def test_analyze_beating_non_piv_modes_have_no_vector_field():
     assert result.piv_field is None
 
 
+def test_analyze_beating_reports_decay_times_and_start_end_timestamps():
+    fps = 30.0
+    frames = _make_pulsing_frames(n_frames=180, fps=fps, hz=1.0)
+    result = analyze_beating(frames, fps, signal_mode="reference")
+    assert set(result.beats_df.columns) >= {
+        "contraction_start_time_s",
+        "relaxation_end_time_s",
+        "time_to_decay_10_s",
+        "time_to_decay_50_s",
+        "time_to_decay_90_s",
+    }
+    for _, beat in result.beats_df.iterrows():
+        assert beat["contraction_start_time_s"] <= beat["peak_time_s"] <= beat["relaxation_end_time_s"]
+        t10, t50, t90 = beat["time_to_decay_10_s"], beat["time_to_decay_50_s"], beat["time_to_decay_90_s"]
+        if t10 is not None and t50 is not None:
+            assert t10 <= t50
+        if t50 is not None and t90 is not None:
+            assert t50 <= t90
+    assert result.summary["mean_time_to_decay_10_s"] is not None
+    assert result.summary["mean_time_to_decay_50_s"] is not None
+
+
 def test_analyze_beating_piv_mode_warns_on_flat_untextured_video():
     fps = 30.0
     frames = _make_pulsing_frames(n_frames=90, fps=fps, hz=1.0, size=64, textured=False)
