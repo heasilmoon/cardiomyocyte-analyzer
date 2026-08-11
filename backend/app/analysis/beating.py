@@ -28,7 +28,12 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 
-from app.analysis.piv import assess_texture, compute_piv_field, compute_piv_motion_signal
+from app.analysis.piv import (
+    assess_texture,
+    compute_piv_field,
+    compute_piv_motion_signal,
+    compute_window_texture_mask,
+)
 from app.analysis.signal_common import (
     detect_peaks,
     estimate_dominant_period_s,
@@ -58,6 +63,43 @@ class BeatingResult:
 def _consecutive_diff_signal(frames: np.ndarray) -> np.ndarray:
     diffs = np.abs(np.diff(frames.astype(np.float32), axis=0))
     return diffs.mean(axis=(1, 2))
+
+
+def _time_to_decay(
+    time_s: np.ndarray,
+    values: np.ndarray,
+    peak_idx: int,
+    end_idx: int,
+    baseline: float,
+    amplitude: float,
+    fraction: float,
+) -> float | None:
+    """Time after a beat's peak for the signal to decay by `fraction` of its amplitude.
+
+    Matches the "time-to-decay T10/T50/T90" parameters reported by
+    PIV-MyoMonitor (Lee et al., 2024, Front. Bioeng. Biotechnol.) — T10 is
+    the (short) time to drop 10% of the way back to baseline, T90 the
+    (longer) time to drop 90% of the way. The crossing point is linearly
+    interpolated between the two bracketing samples rather than snapped to
+    the nearest frame, since frame spacing alone can be coarse relative to
+    the decay itself at low fps.
+
+    Returns None if the amplitude is non-positive or the signal never
+    reaches the target level before `end_idx` (e.g. a truncated final beat).
+    """
+    if amplitude <= 0 or end_idx <= peak_idx:
+        return None
+    target = baseline + (1.0 - fraction) * amplitude
+    for k in range(peak_idx, end_idx):
+        v0, v1 = values[k], values[k + 1]
+        if v1 <= target:
+            if v0 == v1:
+                t_cross = time_s[k]
+            else:
+                frac = (v0 - target) / (v0 - v1)
+                t_cross = time_s[k] + frac * (time_s[k + 1] - time_s[k])
+            return float(t_cross - time_s[peak_idx])
+    return None
 
 
 def pick_reference_frame(frames: np.ndarray, fps: float = 30.0) -> int:
@@ -110,7 +152,11 @@ def compute_motion_signal(
         return _consecutive_diff_signal(frames), None
 
     if mode == "piv":
-        return compute_piv_motion_signal(frames, window_size=piv_window_size, step=piv_step), None
+        texture_mask = compute_window_texture_mask(frames[0], window_size=piv_window_size, step=piv_step)
+        signal = compute_piv_motion_signal(
+            frames, window_size=piv_window_size, step=piv_step, texture_mask=texture_mask
+        )
+        return signal, None
 
     if mode != "reference":
         raise ValueError(f"Unknown signal mode: {mode}")
@@ -187,15 +233,24 @@ def analyze_beating(
             float(-np.min(np.diff(relaxation_segment)) * fps) if len(relaxation_segment) > 1 else None
         )
 
+        time_to_decay_10_s = _time_to_decay(time_s, smoothed, peak, trough_after, baseline, amplitude, 0.10)
+        time_to_decay_50_s = _time_to_decay(time_s, smoothed, peak, trough_after, baseline, amplitude, 0.50)
+        time_to_decay_90_s = _time_to_decay(time_s, smoothed, peak, trough_after, baseline, amplitude, 0.90)
+
         beats.append(
             {
                 "beat_index": i,
+                "contraction_start_time_s": float(time_s[trough_before]),
                 "peak_time_s": float(time_s[peak]),
+                "relaxation_end_time_s": float(time_s[trough_after]),
                 "amplitude": amplitude,
                 "contraction_time_s": contraction_time_s,
                 "relaxation_time_s": relaxation_time_s,
                 "max_contraction_velocity": max_contraction_velocity,
                 "max_relaxation_velocity": max_relaxation_velocity,
+                "time_to_decay_10_s": time_to_decay_10_s,
+                "time_to_decay_50_s": time_to_decay_50_s,
+                "time_to_decay_90_s": time_to_decay_90_s,
                 "inter_beat_interval_s": ibi_s,
                 "instantaneous_bpm": (60.0 / ibi_s) if ibi_s else None,
             }
@@ -236,6 +291,15 @@ def analyze_beating(
         "mean_max_relaxation_velocity": (
             float(beats_df["max_relaxation_velocity"].dropna().mean()) if len(beats_df) else None
         ),
+        "mean_time_to_decay_10_s": (
+            float(beats_df["time_to_decay_10_s"].dropna().mean()) if len(beats_df) else None
+        ),
+        "mean_time_to_decay_50_s": (
+            float(beats_df["time_to_decay_50_s"].dropna().mean()) if len(beats_df) else None
+        ),
+        "mean_time_to_decay_90_s": (
+            float(beats_df["time_to_decay_90_s"].dropna().mean()) if len(beats_df) else None
+        ),
     }
 
     piv_field = None
@@ -243,6 +307,9 @@ def analyze_beating(
         texture = assess_texture(frames[0], window_size=piv_window_size, step=piv_step)
         summary["piv_median_window_std"] = texture["median_window_std"]
         summary["piv_low_texture_warning"] = texture["low_texture"]
+        texture_mask = compute_window_texture_mask(frames[0], window_size=piv_window_size, step=piv_step)
+        summary["piv_n_windows_total"] = int(texture_mask.size)
+        summary["piv_n_low_texture_windows_masked"] = int((~texture_mask).sum())
 
     if signal_mode == "piv" and len(peaks) > 0:
         # Representative vector field at the strongest beat, for the
