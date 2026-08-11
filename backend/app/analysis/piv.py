@@ -23,6 +23,7 @@ curation — trading some of PIVlab's accuracy for batch-friendliness.
 from __future__ import annotations
 
 import numpy as np
+from numpy.lib.stride_tricks import sliding_window_view
 
 # Empirically calibrated on two otherwise-identical synthetic test videos:
 # a flat-background pulsing disk (median per-window intensity std ~0.5,
@@ -100,6 +101,15 @@ def compute_piv_field(
     grids) and u, v (displacement in x/y, pixels — positive u = rightward,
     positive v = downward, array/image convention), all shaped
     (n_rows, n_cols).
+
+    All windows are cross-correlated in one batched FFT call (numpy's fft2
+    treats leading array axes as a batch dimension) rather than one Python
+    loop iteration + FFT call per window. Numerically identical to looping
+    window-by-window, just much faster — this was previously the dominant
+    cost for real (not small-synthetic-test-sized) video: a 500x500 frame
+    at the default window_size=32/step=16 has ~900 windows, so per-frame-
+    pair cost was ~900 separate small FFT calls with Python-loop overhead
+    on top.
     """
     if frame_a.shape != frame_b.shape:
         raise ValueError(f"Frame shapes must match (got {frame_a.shape} and {frame_b.shape})")
@@ -114,32 +124,43 @@ def compute_piv_field(
     a = frame_a.astype(np.float64)
     b = frame_b.astype(np.float64)
 
+    # sliding_window_view is a zero-copy view over every possible window
+    # position; np.ix_ then pulls out just the strided (step-spaced) grid
+    # of windows we actually want, as one small copy.
+    windows_a = sliding_window_view(a, (window_size, window_size))[np.ix_(ys, xs)]
+    windows_b = sliding_window_view(b, (window_size, window_size))[np.ix_(ys, xs)]
+    windows_a = windows_a - windows_a.mean(axis=(-2, -1), keepdims=True)
+    windows_b = windows_b - windows_b.mean(axis=(-2, -1), keepdims=True)
+
+    fa = np.fft.fft2(windows_a)
+    fb = np.fft.fft2(windows_b)
+    # conj(fa)*fb (not fa*conj(fb)) so the correlation peak lands at
+    # +shift when frame_b's content is frame_a's shifted by +shift —
+    # i.e. u/v come out as "how frame_b moved relative to frame_a,"
+    # verified against scipy.ndimage.shift with a known offset.
+    corr = np.fft.fftshift(np.fft.ifft2(np.conj(fa) * fb).real, axes=(-2, -1))
+
+    n_rows, n_cols = len(ys), len(xs)
+    flat_idx = np.argmax(corr.reshape(n_rows, n_cols, -1), axis=-1)
+    py_grid, px_grid = np.unravel_index(flat_idx, (window_size, window_size))
+
     x_grid, y_grid = np.meshgrid(
         [x + window_size / 2 for x in xs], [y + window_size / 2 for y in ys]
     )
-    u = np.zeros((len(ys), len(xs)))
-    v = np.zeros((len(ys), len(xs)))
+    u = np.zeros((n_rows, n_cols))
+    v = np.zeros((n_rows, n_cols))
     center = window_size // 2
 
-    for i, y in enumerate(ys):
-        for j, x in enumerate(xs):
-            wa = a[y : y + window_size, x : x + window_size]
-            wb = b[y : y + window_size, x : x + window_size]
-            wa = wa - wa.mean()
-            wb = wb - wb.mean()
-            fa = np.fft.fft2(wa)
-            fb = np.fft.fft2(wb)
-            # conj(fa)*fb (not fa*conj(fb)) so the correlation peak lands at
-            # +shift when frame_b's content is frame_a's shifted by +shift —
-            # i.e. u/v come out as "how frame_b moved relative to frame_a,"
-            # verified against scipy.ndimage.shift with a known offset.
-            corr = np.fft.fftshift(np.fft.ifft2(np.conj(fa) * fb).real)
-            py, px = np.unravel_index(np.argmax(corr), corr.shape)
+    # Only the cheap, non-FFT sub-pixel refinement step still loops per
+    # window (it just reads a few neighboring correlation values).
+    for i in range(n_rows):
+        for j in range(n_cols):
+            py, px = int(py_grid[i, j]), int(px_grid[i, j])
             # Sub-pixel Gaussian fit needs strictly positive correlation
             # values (it works in log-space); shifting doesn't change where
             # the peak is, only what the fit sees around it.
-            corr_shifted = corr - corr.min() + 1e-6
-            dy_sub, dx_sub = _gaussian_subpixel(corr_shifted, int(py), int(px))
+            corr_shifted = corr[i, j] - corr[i, j].min() + 1e-6
+            dy_sub, dx_sub = _gaussian_subpixel(corr_shifted, py, px)
             v[i, j] = (py - center) + dy_sub
             u[i, j] = (px - center) + dx_sub
 

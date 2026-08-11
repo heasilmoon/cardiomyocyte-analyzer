@@ -22,7 +22,12 @@ Python(FastAPI + OpenCV + scikit-image) 기반으로, Fiji 전체 배포판(수�
   수 있으므로, `piv_median_window_std`가 낮으면(대략 3 미만) 응답에 `piv_low_texture_warning: true`가
   붙고 프론트엔드에도 경고 배너가 뜹니다 — 이 경고가 뜨면 `reference` 또는 `consecutive` 모드를
   쓰세요. 또한 PIVlab처럼 반복적인 윈도우 변형/다단계(multi-pass) 정제는 하지 않는 단일 패스
-  구현이라 큰 변위나 미세 구조에는 PIVlab만큼 정확하지 않을 수 있습니다.
+  구현이라 큰 변위나 미세 구조에는 PIVlab만큼 정확하지 않을 수 있습니다. **PIV는 `reference`/
+  `consecutive`보다 훨씬 느립니다** — 프레임마다 격자 전체를 FFT 교차상관하기 때문입니다. 대략
+  640×480/30fps/10초 영상이면 수십 초, 그보다 크거나 긴 영상은 1분 이상 걸릴 수 있습니다. 느리면
+  `piv_window_size`를 32에서 64 이상으로 키우거나 `piv_step`을 `piv_window_size`와 같은 값(창을
+  겹치지 않게)으로 늘려서 창 개수를 줄이면 빨라집니다(공간 해상도는 낮아지지만 박동 검출용 신호
+  품질에는 보통 큰 영향이 없습니다).
 - **칼슘 이미징 분석 (Calcium imaging)**: 형광 강도 트레이스를 ΔF/F0로 정규화하고 각 트랜지언트의
   피크 시각, 진폭, rise time(10–90%), 지수 감쇠 시간상수(τ)를 계산합니다.
 - **형태 분석 (Morphology, 2D/3D)**: 2D는 대표 이미지(최대 강도 투영)를, 3D는 영상의 각 프레임을
