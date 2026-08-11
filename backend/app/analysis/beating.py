@@ -3,7 +3,7 @@
 Implements the same core idea as Fiji's MUSCLEMOTION plugin (Sala et al.,
 2018, Circulation Research): pixel-intensity differences over time are used
 as a proxy for contractile motion, and beats are detected as peaks in that
-signal. Two signal modes are supported, matching MUSCLEMOTION's two modes:
+signal. Three signal modes are supported:
 
 - "reference" (default): each frame is compared to a single resting/diastolic
   reference frame. This produces a displacement-like signal that rises during
@@ -14,6 +14,11 @@ signal. Two signal modes are supported, matching MUSCLEMOTION's two modes:
   show two peaks per beat (one for the contraction stroke, one for the
   relaxation stroke) when contraction and relaxation happen at comparable
   speed. Kept as an option for comparison/debugging.
+- "piv": mean displacement-vector magnitude between consecutive frames from
+  windowed cross-correlation PIV (see piv.py) — the same algorithm family as
+  PIVlab's piv_FFTmulti, used by PIV-MyoMonitor for cardiac organoid
+  contractility. Richer (a full 2D motion field, not just a scalar) but
+  slower than the other two modes.
 """
 from __future__ import annotations
 
@@ -23,6 +28,7 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 
+from app.analysis.piv import assess_texture, compute_piv_field, compute_piv_motion_signal
 from app.analysis.signal_common import (
     detect_peaks,
     estimate_dominant_period_s,
@@ -30,7 +36,7 @@ from app.analysis.signal_common import (
     smooth,
 )
 
-SignalMode = Literal["reference", "consecutive"]
+SignalMode = Literal["reference", "consecutive", "piv"]
 
 
 @dataclass
@@ -46,6 +52,7 @@ class BeatingResult:
     trough_indices: np.ndarray
     beats_df: pd.DataFrame
     summary: dict = field(default_factory=dict)
+    piv_field: dict | None = None
 
 
 def _consecutive_diff_signal(frames: np.ndarray) -> np.ndarray:
@@ -85,20 +92,25 @@ def compute_motion_signal(
     mode: SignalMode = "reference",
     reference_index: int | None = None,
     fps: float = 30.0,
+    piv_window_size: int = 32,
+    piv_step: int | None = None,
 ) -> tuple[np.ndarray, int | None]:
     """Motion signal used as the contraction proxy.
 
     frames: (N, H, W) grayscale array.
     Returns (signal, reference_frame_index). reference_frame_index is None
-    for "consecutive" mode. In "reference" mode the signal has length N
-    (one value per frame, index 0 included); in "consecutive" mode it has
-    length N-1 (one value per frame-to-frame transition).
+    for "consecutive" and "piv" modes. In "reference" mode the signal has
+    length N (one value per frame, index 0 included); in "consecutive" and
+    "piv" modes it has length N-1 (one value per frame-to-frame transition).
     """
     if frames.ndim != 3:
         raise ValueError("Expected grayscale frames with shape (N, H, W)")
 
     if mode == "consecutive":
         return _consecutive_diff_signal(frames), None
+
+    if mode == "piv":
+        return compute_piv_motion_signal(frames, window_size=piv_window_size, step=piv_step), None
 
     if mode != "reference":
         raise ValueError(f"Unknown signal mode: {mode}")
@@ -118,9 +130,16 @@ def analyze_beating(
     prominence_frac: float = 0.15,
     signal_mode: SignalMode = "reference",
     reference_index: int | None = None,
+    piv_window_size: int = 32,
+    piv_step: int | None = None,
 ) -> BeatingResult:
     raw_signal, used_reference_index = compute_motion_signal(
-        frames, mode=signal_mode, reference_index=reference_index, fps=fps
+        frames,
+        mode=signal_mode,
+        reference_index=reference_index,
+        fps=fps,
+        piv_window_size=piv_window_size,
+        piv_step=piv_step,
     )
     n = len(raw_signal)
     time_s = np.arange(n) / fps
@@ -219,6 +238,24 @@ def analyze_beating(
         ),
     }
 
+    piv_field = None
+    if signal_mode == "piv":
+        texture = assess_texture(frames[0], window_size=piv_window_size, step=piv_step)
+        summary["piv_median_window_std"] = texture["median_window_std"]
+        summary["piv_low_texture_warning"] = texture["low_texture"]
+
+    if signal_mode == "piv" and len(peaks) > 0:
+        # Representative vector field at the strongest beat, for the
+        # PIVlab-style arrow/heatmap visualization — computing and storing
+        # a field for every frame pair in the video would be expensive and
+        # is rarely useful beyond one illustrative example.
+        strongest_peak = int(peaks[np.argmax(smoothed[peaks])])
+        strongest_peak = min(strongest_peak, frames.shape[0] - 2)
+        piv_field = compute_piv_field(
+            frames[strongest_peak], frames[strongest_peak + 1], window_size=piv_window_size, step=piv_step
+        )
+        piv_field["frame_index"] = strongest_peak
+
     return BeatingResult(
         fps=fps,
         n_frames=int(frames.shape[0]),
@@ -231,4 +268,5 @@ def analyze_beating(
         trough_indices=troughs,
         beats_df=beats_df,
         summary=summary,
+        piv_field=piv_field,
     )

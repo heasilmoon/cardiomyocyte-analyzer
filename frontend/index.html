@@ -25,7 +25,10 @@
       <p>밝은 시야(bright-field) 영상에서 픽셀 변화량을 이용해 수축/이완 신호를 추출하고 박동을 검출합니다.
       Fiji MUSCLEMOTION 플러그인과 동일한 방식으로, 기본값은 기준(이완기) 프레임 대비 차이를 사용합니다.
       박동 수가 실제와 다르면(너무 많음=노이즈 오검출, 너무 적음=약한 박동 누락) "피크 민감도"를
-      0.05~0.2 사이에서 조정하며 다시 분석해보세요 — 이 값은 영상마다 조금씩 다를 수 있습니다.</p>
+      0.05~0.2 사이에서 조정하며 다시 분석해보세요 — 이 값은 영상마다 조금씩 다를 수 있습니다.
+      "piv" 모드는 PIV-MyoMonitor(soahleelab)와 같은 계열의 알고리즘(FFT 기반 windowed
+      cross-correlation)으로 프레임 간 변위 벡터장을 계산합니다 — 스칼라 신호가 아니라 실제 방향+크기
+      정보를 가진 모션 필드를 얻을 수 있지만 계산이 더 오래 걸립니다.</p>
       <form data-endpoint="/api/analyze/beating">
         <div class="form-row">
           <div class="field">
@@ -34,9 +37,10 @@
           </div>
           <div class="field">
             <label>신호 방식</label>
-            <select name="signal_mode">
+            <select name="signal_mode" id="beating-signal-mode">
               <option value="reference">reference (MUSCLEMOTION 기본)</option>
               <option value="consecutive">consecutive (프레임 간 차이)</option>
+              <option value="piv">piv (벡터장, PIV-MyoMonitor 계열)</option>
             </select>
           </div>
           <div class="field">
@@ -51,6 +55,18 @@
             <label>피크 민감도 (0-1)</label>
             <input type="number" name="prominence_frac" value="0.15" step="0.01" min="0" max="1" />
           </div>
+        </div>
+        <div class="form-row" id="beating-piv-fields" style="display:none;">
+          <div class="field">
+            <label>PIV 윈도우 크기 (px)</label>
+            <input type="number" name="piv_window_size" value="32" />
+          </div>
+          <div class="field">
+            <label>PIV 스텝 크기 (px, 선택)</label>
+            <input type="number" name="piv_step" placeholder="윈도우 크기의 절반" />
+          </div>
+        </div>
+        <div class="form-row">
           <button class="primary" type="submit">분석 시작</button>
         </div>
       </form>

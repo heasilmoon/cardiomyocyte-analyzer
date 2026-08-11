@@ -92,8 +92,10 @@ async def analyze_beating_endpoint(
     fps_override: float | None = Form(default=None),
     min_bpm_gap: float | None = Form(default=None),
     prominence_frac: float = Form(default=0.15),
-    signal_mode: Literal["reference", "consecutive"] = Form(default="reference"),
+    signal_mode: Literal["reference", "consecutive", "piv"] = Form(default="reference"),
     reference_index: int | None = Form(default=None),
+    piv_window_size: int = Form(default=32),
+    piv_step: int | None = Form(default=None),
 ):
     upload_path = _save_upload(file)
     try:
@@ -105,6 +107,8 @@ async def analyze_beating_endpoint(
             prominence_frac=prominence_frac,
             signal_mode=signal_mode,
             reference_index=reference_index,
+            piv_window_size=piv_window_size,
+            piv_step=piv_step,
         )
     finally:
         upload_path.unlink(missing_ok=True)

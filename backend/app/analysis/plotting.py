@@ -18,7 +18,12 @@ from app.analysis.morphology import MorphologyResult
 
 
 def plot_beating(result: BeatingResult, out_path: str) -> None:
-    fig, ax = plt.subplots(figsize=(9, 4))
+    has_piv_field = result.piv_field is not None
+    if has_piv_field:
+        fig, (ax, ax2) = plt.subplots(1, 2, figsize=(14, 4.5))
+    else:
+        fig, ax = plt.subplots(figsize=(9, 4))
+
     ax.plot(result.time_s, result.smoothed_signal, color="#c0392b", linewidth=1.3, label="motion signal")
     if len(result.peak_indices):
         ax.plot(
@@ -38,18 +43,43 @@ def plot_beating(result: BeatingResult, out_path: str) -> None:
             markersize=4,
             label="baseline",
         )
-    ylabel = (
-        "Mean |frame − reference frame| intensity"
-        if result.signal_mode == "reference"
-        else "Mean frame-to-frame intensity change"
-    )
+    ylabels = {
+        "reference": "Mean |frame − reference frame| intensity",
+        "consecutive": "Mean frame-to-frame intensity change",
+        "piv": "Mean PIV displacement magnitude (px)",
+    }
     ax.set_xlabel("Time (s)")
-    ax.set_ylabel(ylabel)
+    ax.set_ylabel(ylabels.get(result.signal_mode, "Motion signal"))
     ax.set_title(f"Beating signal ({result.signal_mode}) — {result.summary.get('n_beats', 0)} beats detected")
     ax.legend(loc="upper right", fontsize=8)
+
+    if has_piv_field:
+        _draw_piv_field(ax2, result.piv_field)
+        ax2.set_title(f"PIV vector field @ frame {result.piv_field['frame_index']} (strongest beat)", fontsize=10)
+
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
+
+
+def _draw_piv_field(ax, field: dict) -> None:
+    """Vector arrows over a magnitude heatmap — the standard PIV output
+    visualization (matches PIVlab/PIV-MyoMonitor's vector-arrow + heatmap
+    figures)."""
+    x, y, u, v = field["x"], field["y"], field["u"], field["v"]
+    magnitude = np.sqrt(u**2 + v**2)
+    im = ax.imshow(
+        magnitude,
+        extent=(x.min(), x.max(), y.max(), y.min()),
+        cmap="viridis",
+        aspect="auto",
+        alpha=0.85,
+    )
+    ax.quiver(x, y, u, v, color="white", scale_units="xy", angles="xy", width=0.004)
+    ax.figure.colorbar(im, ax=ax, label="displacement magnitude (px)", fraction=0.046, pad=0.04)
+    ax.set_xlabel("x (px)")
+    ax.set_ylabel("y (px)")
+    ax.invert_yaxis()
 
 
 def plot_calcium(result: CalciumResult, out_path: str) -> None:

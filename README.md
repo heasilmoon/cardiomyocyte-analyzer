@@ -12,6 +12,17 @@ Python(FastAPI + OpenCV + scikit-image) 기반으로, Fiji 전체 배포판(수�
   추정한 그 영상의 실제 박동 주기에 맞춰 자동으로 조정되어(예: `min_bpm_gap`을 비워두면 자동), 느린
   박동(hiPSC-CM, 대략 20-90 BPM)에서 프레임 단위 노이즈를 박동으로 오검출하는 문제를 줄입니다.
   박동수(BPM), 박동 간격(IBI)과 변동계수, 진폭, 수축/이완 시간, 최대 수축/이완 속도를 계산합니다.
+  세 번째 옵션으로 **`piv` 모드**(PIV, particle image velocimetry)도 있습니다 — 프레임을
+  촘촘한 격자(interrogation window)로 나눠 각 창의 FFT 기반 교차상관으로 국소 변위 벡터를 구하는
+  방식으로, PIVlab의 `piv_FFTmulti`와 같은 알고리즘 계열입니다(심장 오가노이드 수축력 분석 도구인
+  [PIV-MyoMonitor](https://github.com/soahleelab/PIV-MyoMonitor)가 이 방식을 씁니다). 스칼라
+  강도 차이 대신 실제 2D 변위 벡터장을 얻을 수 있어 가장 강한 박동 시점의 벡터장(화살표 + 크기
+  히트맵)을 함께 시각화합니다. 다만 PIV는 교차상관이 걸릴 수 있는 명암 텍스처(반점/알갱이 무늬)가
+  영상에 있어야 동작합니다 — 배경이 밋밋한 명시야 영상에서는 상관 피크가 모호해져 결과가 부정확해질
+  수 있으므로, `piv_median_window_std`가 낮으면(대략 3 미만) 응답에 `piv_low_texture_warning: true`가
+  붙고 프론트엔드에도 경고 배너가 뜹니다 — 이 경고가 뜨면 `reference` 또는 `consecutive` 모드를
+  쓰세요. 또한 PIVlab처럼 반복적인 윈도우 변형/다단계(multi-pass) 정제는 하지 않는 단일 패스
+  구현이라 큰 변위나 미세 구조에는 PIVlab만큼 정확하지 않을 수 있습니다.
 - **칼슘 이미징 분석 (Calcium imaging)**: 형광 강도 트레이스를 ΔF/F0로 정규화하고 각 트랜지언트의
   피크 시각, 진폭, rise time(10–90%), 지수 감쇠 시간상수(τ)를 계산합니다.
 - **형태 분석 (Morphology, 2D/3D)**: 2D는 대표 이미지(최대 강도 투영)를, 3D는 영상의 각 프레임을
@@ -67,7 +78,7 @@ docker run -p 8000:8000 cardiomyocyte-analyzer
 
 | Endpoint | 설명 |
 |---|---|
-| `POST /api/analyze/beating` | `file`(mp4), `fps_override`, `min_bpm_gap`(선택, 비우면 자동 추정), `prominence_frac`, `signal_mode`(`reference`/`consecutive`), `reference_index` |
+| `POST /api/analyze/beating` | `file`(mp4), `fps_override`, `min_bpm_gap`(선택, 비우면 자동 추정), `prominence_frac`, `signal_mode`(`reference`/`consecutive`/`piv`), `reference_index`, `piv_window_size`(기본 32px), `piv_step`(기본 window_size/2) |
 | `POST /api/analyze/calcium` | `file`(mp4), `fps_override`, `min_transients_per_min`, `prominence_frac` |
 | `POST /api/analyze/morphology` | `file`(mp4), `mode`(`2d`/`3d`), `min_object_size`, `separate_touching`, `separation_min_distance`, `compute_texture_alignment` |
 | `POST /api/analyze/compare` | `analysis_type`(`beating`/`calcium`/`morphology`), `morphology_mode`, `group_a_label`, `group_b_label`, `group_a_files`(다중), `group_b_files`(다중), `group_a_batches`(선택, 줄바꿈/쉼표로 구분된 배치 라벨), `group_b_batches` |
@@ -138,6 +149,15 @@ pytest tests/ -v
   바꿔야 할 수 있습니다.
 - 업로드 용량 상한(`MAX_UPLOAD_BYTES`, 기본 300MB)과 최대 프레임 수(`MAX_FRAMES`, 기본 3000)는
   `backend/app/config.py`에서 조정할 수 있습니다.
+- **PIV 모드는 텍스처가 있는 영상에서만 신뢰할 수 있습니다**: 배경이 밋밋한 명시야(bright-field)
+  영상(예: 저장소의 기본 `beating.mp4` 데모)에서 실제로 박동을 크게 과다검출하는 것을 확인했습니다
+  (참 박동 6회/60 BPM인 영상에서 15회/152 BPM로 오검출). 원인은 알고리즘 버그가 아니라 인터로게이션
+  창 내부에 상관 매칭에 쓸 명암 무늬가 거의 없어서였습니다(배경 패치 표준편차 ≈ 0.5). 같은 영상에
+  합성 반점 텍스처를 더하자(`piv_median_window_std` ≈ 11.5) 정확히 6회/60 BPM으로 검출되었습니다.
+  이 문제를 자동으로 걸러내기 위해 `piv_median_window_std` < 3(경험적 임계값, 두 케이스의 로그
+  스케일 중간값)이면 `piv_low_texture_warning`을 띄웁니다 — 완전 자동 필터링이 아니라 경고이므로,
+  실제 세포 영상에서는 이 임계값이 항상 맞는다는 보장이 없습니다. 중요한 분석에는 벡터장 시각화를
+  눈으로 확인하세요.
 
 ## 라이선스 및 인용
 
