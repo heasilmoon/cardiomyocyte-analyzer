@@ -113,6 +113,14 @@ nav.tabs button.active {
   cursor: pointer;
 }
 
+.compare-group-block {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 0.75rem 0.25rem;
+  margin-bottom: 1rem;
+}
+.compare-group-remove { margin-left: auto; }
+
 button.primary {
   background: var(--accent);
   color: white;

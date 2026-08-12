@@ -299,34 +299,64 @@ if (compareAnalysisType) {
 
 function renderComparisonResults(container, data) {
   const { comparison, urls } = data;
-  const hasLmm = comparison.metrics.some((m) => m.lmm_p_value !== undefined);
+  const hasLmm = comparison.metrics.some((m) => m.lmm_pairwise !== undefined);
+  const testLabel = (t) => (t === "mann_whitney_u" ? "Mann-Whitney U" : "Kruskal-Wallis");
+
   const rows = comparison.metrics
     .map((m) => {
       const sig = m.p_value !== null && m.p_value < 0.05 ? " *" : "";
       const pText = m.p_value !== null ? m.p_value.toFixed(4) + sig : "&mdash;";
-      let lmmCell = "";
-      if (hasLmm) {
-        if (m.lmm_p_value !== undefined) {
-          const lmmSig = m.lmm_p_value < 0.05 ? " *" : "";
-          lmmCell = `<td>${m.lmm_p_value.toFixed(4)}${lmmSig} (${m.lmm_n_clusters} clusters)</td>`;
-        } else {
-          lmmCell = "<td>&mdash;</td>";
-        }
+      const groupsText = m.groups
+        .map((g) => `${g.label}: ${formatValue(g.mean)} &plusmn; ${formatValue(g.std)} (n=${g.n})`)
+        .join("<br/>");
+
+      let posthocText = "&mdash;";
+      if (m.posthoc) {
+        posthocText = m.posthoc
+          .map((p) => {
+            const s = p.p_value_bonferroni < 0.05 ? " *" : "";
+            return `${p.group_a} vs ${p.group_b}: p=${p.p_value_bonferroni.toFixed(4)}${s}`;
+          })
+          .join("<br/>");
       }
+
+      let lmmText = "&mdash;";
+      if (m.lmm_pairwise) {
+        lmmText = m.lmm_pairwise
+          .map((p) => {
+            const s = p.p_value < 0.05 ? " *" : "";
+            return `${p.group_a} vs ${p.group_b}: p=${p.p_value.toFixed(4)}${s}`;
+          })
+          .join("<br/>");
+        lmmText += `<br/><span style="color:var(--muted)">(${m.lmm_n_clusters} clusters)</span>`;
+      }
+
       return `<tr>
         <td>${fieldLabel(m.metric)}</td>
-        <td>${formatValue(m.mean_a)} &plusmn; ${formatValue(m.std_a)} (n=${m.n_a})</td>
-        <td>${formatValue(m.mean_b)} &plusmn; ${formatValue(m.std_b)} (n=${m.n_b})</td>
+        <td>${groupsText}</td>
         <td>${pText}</td>
-        ${lmmCell}
+        ${comparison.labels.length > 2 ? `<td>${posthocText}</td>` : ""}
+        ${hasLmm ? `<td>${lmmText}</td>` : ""}
       </tr>`;
     })
     .join("");
 
+  const omnibusTestName = comparison.metrics.length ? testLabel(comparison.metrics[0].test) : "";
+  const groupHeaders = comparison.labels
+    .map((label, i) => `${label} (n=${comparison.n_videos[i]})`)
+    .join(", ");
+
   container.innerHTML = `
     ${urls.plot ? `<img src="${API_BASE}${urls.plot}" alt="comparison plot" />` : ""}
+    <p class="roi-applied-note">그룹: ${groupHeaders}</p>
     <table class="summary compare-table">
-      <thead><tr><th>지표</th><th>${comparison.label_a} (n=${comparison.n_videos_a})</th><th>${comparison.label_b} (n=${comparison.n_videos_b})</th><th>Mann-Whitney U p-value</th>${hasLmm ? "<th>LMM p-value (샘플 보정)</th>" : ""}</tr></thead>
+      <thead><tr>
+        <th>지표</th>
+        <th>그룹별 평균 &plusmn; 표준편차 (n)</th>
+        <th>${omnibusTestName} p-value</th>
+        ${comparison.labels.length > 2 ? "<th>Dunn's post-hoc (Bonferroni)</th>" : ""}
+        ${hasLmm ? "<th>LMM 쌍별 p-value (샘플 보정)</th>" : ""}
+      </tr></thead>
       <tbody>${rows}</tbody>
     </table>
     <div class="links">
@@ -335,6 +365,61 @@ function renderComparisonResults(container, data) {
     </div>
   `;
 }
+
+function setupCompareGroups() {
+  const container = document.getElementById("compare-groups");
+  const addBtn = document.getElementById("compare-add-group");
+  if (!container || !addBtn) return;
+
+  let nextIndex = 0;
+
+  function groupCount() {
+    return container.querySelectorAll(".compare-group-block").length;
+  }
+
+  function updateRemoveButtons() {
+    const removable = groupCount() > 2;
+    container.querySelectorAll(".compare-group-remove").forEach((btn) => {
+      btn.style.display = removable ? "" : "none";
+    });
+  }
+
+  function addGroup(defaultLabel) {
+    const idx = nextIndex++;
+    const block = document.createElement("div");
+    block.className = "compare-group-block";
+    block.innerHTML = `
+      <div class="form-row">
+        <div class="field">
+          <label>그룹 라벨</label>
+          <input type="text" name="group_${idx}_label" value="${defaultLabel || `Group ${idx + 1}`}" />
+        </div>
+        <div class="field">
+          <label>그룹 영상 (여러 개 선택)</label>
+          <input type="file" name="group_${idx}_files" accept="video/*" multiple required />
+        </div>
+        <div class="field">
+          <label>배치/샘플 라벨 (선택, 파일 순서대로)</label>
+          <textarea name="group_${idx}_batches" rows="2" placeholder="예: batch1&#10;batch1&#10;batch2" style="font-family:inherit;font-size:0.9rem;padding:0.4rem 0.5rem;border:1px solid var(--border);border-radius:6px;"></textarea>
+        </div>
+        <button type="button" class="roi-reset compare-group-remove">그룹 삭제</button>
+      </div>
+    `;
+    container.appendChild(block);
+    block.querySelector(".compare-group-remove").addEventListener("click", () => {
+      block.remove();
+      updateRemoveButtons();
+    });
+    updateRemoveButtons();
+  }
+
+  addBtn.addEventListener("click", () => addGroup());
+
+  addGroup("Control");
+  addGroup("Treatment");
+}
+
+setupCompareGroups();
 
 const compareForm = document.getElementById("compare-form");
 if (compareForm) {

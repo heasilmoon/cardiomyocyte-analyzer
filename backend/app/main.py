@@ -7,9 +7,10 @@ import uuid
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.datastructures import UploadFile as StarletteUploadFile
 
 import pandas as pd
 
@@ -17,7 +18,7 @@ from app.analysis import plotting
 from app.analysis.beating import analyze_beating
 from app.analysis.calcium import analyze_calcium
 from app.analysis.colocalization import analyze_colocalization
-from app.analysis.group_stats import compare_groups
+from app.analysis.group_stats import GroupInput, compare_groups
 from app.analysis.morphology import analyze_morphology_2d, analyze_morphology_3d
 from app.analysis.validation_stats import compute_agreement
 from app.config import FRONTEND_DIR, MAX_FRAMES, MAX_UPLOAD_BYTES, RESULTS_DIR, UPLOADS_DIR
@@ -319,35 +320,59 @@ def _parse_batch_labels(text: str | None, expected_count: int, field_name: str) 
 
 
 @app.post("/api/analyze/compare")
-async def analyze_compare_endpoint(
-    analysis_type: Literal["beating", "calcium", "morphology"] = Form(...),
-    morphology_mode: Literal["2d", "3d"] = Form(default="2d"),
-    group_a_label: str = Form(default="Group A"),
-    group_b_label: str = Form(default="Group B"),
-    group_a_files: list[UploadFile] = File(...),
-    group_b_files: list[UploadFile] = File(...),
-    group_a_batches: str | None = Form(default=None),
-    group_b_batches: str | None = Form(default=None),
-):
-    if not group_a_files or not group_b_files:
-        raise HTTPException(status_code=400, detail="Both groups need at least one video file")
+async def analyze_compare_endpoint(request: Request):
+    """Compare an analysis across two or more groups of videos.
 
-    clusters_a = _parse_batch_labels(group_a_batches, len(group_a_files), "group_a_batches")
-    clusters_b = _parse_batch_labels(group_b_batches, len(group_b_files), "group_b_batches")
+    Groups are submitted as indexed multipart fields — group_0_label,
+    group_0_files, group_0_batches, group_1_label, ... — rather than fixed
+    Form() parameters, since the number of groups is dynamic (2+). Reading
+    the raw form here (instead of typed Form()/File() parameters) is what
+    makes that possible; index numbers don't need to be contiguous.
+    """
+    form = await request.form()
 
-    summaries_a = await _summarize_group(group_a_files, analysis_type, morphology_mode)
-    summaries_b = await _summarize_group(group_b_files, analysis_type, morphology_mode)
-    comparison = compare_groups(
-        summaries_a, summaries_b, group_a_label, group_b_label, clusters_a=clusters_a, clusters_b=clusters_b
+    analysis_type = form.get("analysis_type")
+    if analysis_type not in ("beating", "calcium", "morphology"):
+        raise HTTPException(
+            status_code=400, detail="analysis_type must be one of: beating, calcium, morphology"
+        )
+    morphology_mode = form.get("morphology_mode", "2d")
+    if morphology_mode not in ("2d", "3d"):
+        raise HTTPException(status_code=400, detail="morphology_mode must be '2d' or '3d'")
+
+    group_indices = sorted(
+        {
+            int(key.split("_")[1])
+            for key in form.keys()
+            if key.startswith("group_") and key.split("_")[1].isdigit()
+        }
     )
 
+    groups: list[GroupInput] = []
+    for idx in group_indices:
+        files = [
+            f for f in form.getlist(f"group_{idx}_files") if isinstance(f, StarletteUploadFile) and f.filename
+        ]
+        if not files:
+            continue
+        label = str(form.get(f"group_{idx}_label") or f"Group {idx + 1}").strip() or f"Group {idx + 1}"
+        batches_raw = form.get(f"group_{idx}_batches")
+        clusters = (
+            _parse_batch_labels(str(batches_raw), len(files), f"group_{idx}_batches")
+            if batches_raw
+            else None
+        )
+        summaries = await _summarize_group(files, analysis_type, morphology_mode)
+        groups.append(GroupInput(label=label, summaries=summaries, clusters=clusters))
+
+    if len(groups) < 2:
+        raise HTTPException(status_code=400, detail="Need at least 2 groups, each with at least one video file")
+
+    comparison = compare_groups(groups)
+
     result_id, result_dir = _new_result_dir()
-    for s in summaries_a:
-        s["group"] = group_a_label
-    for s in summaries_b:
-        s["group"] = group_b_label
-    combined_df = pd.DataFrame(summaries_a + summaries_b)
-    combined_df.to_csv(result_dir / "data.csv", index=False)
+    combined_rows = [{**s, "group": g.label} for g in groups for s in g.summaries]
+    pd.DataFrame(combined_rows).to_csv(result_dir / "data.csv", index=False)
     (result_dir / "summary.json").write_text(json.dumps(comparison, indent=2))
     plotting.plot_group_comparison(comparison, str(result_dir / "plot.png"))
 

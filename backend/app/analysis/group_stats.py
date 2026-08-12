@@ -1,13 +1,17 @@
-"""Statistical comparison of a metric across two groups of analyzed videos.
+"""Statistical comparison of a metric across two or more groups of analyzed videos.
 
-Meant for the common "treatment vs control" experimental design: run the
-same single-video analysis (beating / calcium / morphology) over every
-video in each group, then compare each numeric summary metric between
-groups with a two-sample test.
+Meant for the common "treatment vs control" (or multi-arm dose/condition)
+experimental design: run the same single-video analysis (beating / calcium /
+morphology) over every video in each group, then compare each numeric
+summary metric across groups.
 
-Mann-Whitney U (rather than a t-test) is used by default since group sizes
-in this kind of experiment are usually small (a handful of wells/videos per
-condition) and there's no reason to assume normality.
+Two groups get a Mann-Whitney U test (rather than a t-test) since group
+sizes in this kind of experiment are usually small (a handful of wells/
+videos per condition) and there's no reason to assume normality. Three or
+more groups get the non-parametric equivalent, Kruskal-Wallis, as the
+omnibus test, followed by Dunn's post-hoc test for each pairwise comparison
+(rank-based, matching Kruskal-Wallis's own assumptions) with Bonferroni
+correction for the multiple pairwise comparisons.
 
 When multiple recordings/images come from the same underlying biological
 sample (e.g. several fields of view from one differentiation batch/well),
@@ -16,13 +20,17 @@ it understates the true variance and inflates the apparent significance,
 because repeated measurements of the same sample are correlated with each
 other, not independent. Passing a cluster/batch label per video lets
 compare_groups additionally fit a linear mixed-effects model (value ~ group
-+ (1|cluster)) that accounts for this, the same general approach (fixed
-effect + random intercept for sample identity, fit by REML, residual
-normality checked via Shapiro-Wilk) used in Lee et al., "IGFBP2 Mediates
-Human iPSC-Cardiomyocyte Proliferation in a Cellular Contact-Dependent
-Manner," Circulation Research, 2025.
++ (1|cluster)) and report cluster-corrected pairwise p-values for every
+group pair (Wald tests via contrasts on a single REML fit), the same
+general approach (fixed effect + random intercept for sample identity, fit
+by REML, residual normality checked via Shapiro-Wilk) used in Lee et al.,
+"IGFBP2 Mediates Human iPSC-Cardiomyocyte Proliferation in a Cellular
+Contact-Dependent Manner," Circulation Research, 2025 — generalized here
+from their two-group design to arbitrarily many groups.
 """
 from __future__ import annotations
+
+from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
@@ -45,6 +53,17 @@ _EXCLUDED_METRICS = {
     "min_bpm_gap_used",
     "smoothing_window_s",
 }
+
+
+@dataclass
+class GroupInput:
+    label: str
+    summaries: list[dict]
+    clusters: list | None = None
+    n_videos: int = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.n_videos = len(self.summaries)
 
 
 def _numeric_values_with_clusters(
@@ -70,43 +89,143 @@ def _numeric_values_with_clusters(
     return values, kept_clusters
 
 
-def _fit_lmm(
-    vals_a: list[float],
-    clusters_a: list,
-    vals_b: list[float],
-    clusters_b: list,
-) -> dict | None:
-    """Fit value ~ group + (1|cluster) via REML; None if not applicable/fittable.
+def _dunns_posthoc(labels: list[str], per_group_vals: list[list[float]]) -> list[dict]:
+    """Dunn's post-hoc pairwise test following a significant Kruskal-Wallis result.
 
-    Only attempted when there's actual repeated-measurement structure to
-    account for (at least one cluster appears more than once) — otherwise
-    the random intercept has nothing to estimate and the fit is either
-    degenerate or offers no benefit over the simpler group-comparison test.
+    Rank-based (matches Kruskal-Wallis's own assumptions, unlike pairwise
+    t-tests), with a tie correction on the standard error and Bonferroni
+    correction across all pairwise comparisons — the simplest, most
+    conservative multiple-comparison correction, chosen over e.g.
+    Benjamini-Hochberg FDR for ease of interpretation at the group counts
+    this tool is meant for (a handful of conditions).
     """
-    if not clusters_a or not clusters_b or any(c is None for c in clusters_a + clusters_b):
+    all_vals = np.concatenate([np.asarray(v) for v in per_group_vals])
+    n_total = len(all_vals)
+    ranks = stats.rankdata(all_vals)
+
+    _, tie_counts = np.unique(all_vals, return_counts=True)
+    tie_correction = float(np.sum(tie_counts**3 - tie_counts)) / (12.0 * (n_total - 1)) if n_total > 1 else 0.0
+
+    mean_ranks = []
+    ns = []
+    offset = 0
+    for vals in per_group_vals:
+        n = len(vals)
+        mean_ranks.append(float(ranks[offset : offset + n].mean()))
+        ns.append(n)
+        offset += n
+
+    n_pairs = len(labels) * (len(labels) - 1) // 2
+    results = []
+    for i in range(len(labels)):
+        for j in range(i + 1, len(labels)):
+            variance_term = (n_total * (n_total + 1) / 12.0 - tie_correction) * (1.0 / ns[i] + 1.0 / ns[j])
+            if variance_term <= 0:
+                continue
+            se = np.sqrt(variance_term)
+            z = (mean_ranks[i] - mean_ranks[j]) / se
+            p_raw = float(2.0 * (1.0 - stats.norm.cdf(abs(z))))
+            results.append(
+                {
+                    "group_a": labels[i],
+                    "group_b": labels[j],
+                    "z": float(z),
+                    "p_value": p_raw,
+                    "p_value_bonferroni": min(p_raw * n_pairs, 1.0),
+                }
+            )
+    return results
+
+
+def _fit_lmm_pairwise(
+    labels: list[str],
+    per_group_vals: list[list[float]],
+    per_group_clusters: list[list],
+) -> dict | None:
+    """Fit value ~ group + (1|cluster) via REML and report every pairwise contrast.
+
+    None if not applicable/fittable — e.g. no cluster labels were given for
+    every group, or there's no actual repeated-measurement structure to
+    account for (every cluster label is unique, so the random intercept has
+    nothing to estimate). Pairwise p-values come from Wald tests on a
+    single fit: raw coefficients for pairs involving the reference group
+    (labels[0]), and linear contrasts (numeric r_matrix passed to
+    statsmodels' t_test) for the rest — this is exact and avoids refitting
+    the model once per pair. Contrasts are built as numeric vectors rather
+    than the string constraint syntax t_test also accepts, because the
+    patsy-generated parameter names here (e.g.
+    "C(group, Treatment(reference='W'))[T.X]") contain '=' and quote
+    characters that break that string parser.
+    """
+    if any(len(clus) == 0 or any(c is None for c in clus) for clus in per_group_clusters):
         return None
 
-    n_total = len(vals_a) + len(vals_b)
-    unique_clusters = set(clusters_a) | set(clusters_b)
+    n_total = sum(len(v) for v in per_group_vals)
+    unique_clusters = {c for clus in per_group_clusters for c in clus}
     if len(unique_clusters) < 2 or len(unique_clusters) >= n_total:
         return None  # no repeated measurements within any cluster
 
-    df = pd.DataFrame(
-        {
-            "value": vals_a + vals_b,
-            "group": (["A"] * len(vals_a)) + (["B"] * len(vals_b)),
-            "cluster": [str(c) for c in clusters_a] + [str(c) for c in clusters_b],
-        }
-    )
+    rows_value: list[float] = []
+    rows_group: list[str] = []
+    rows_cluster: list[str] = []
+    for label, vals, clus in zip(labels, per_group_vals, per_group_clusters):
+        rows_value.extend(vals)
+        rows_group.extend([label] * len(vals))
+        rows_cluster.extend(str(c) for c in clus)
+    df = pd.DataFrame({"value": rows_value, "group": rows_group, "cluster": rows_cluster})
 
+    reference = labels[0]
+    formula = f"value ~ C(group, Treatment(reference={reference!r}))"
     try:
-        model = MixedLM.from_formula("value ~ group", groups="cluster", data=df)
+        model = MixedLM.from_formula(formula, groups="cluster", data=df)
         fit = model.fit(reml=True)
     except Exception:
         return None
 
-    coef_name = "group[T.B]"
-    if coef_name not in fit.params:
+    def _coef_name(other_label: str) -> str:
+        return f"C(group, Treatment(reference={reference!r}))[T.{other_label}]"
+
+    # r_matrix width must match the fixed-effects vector only (fit.params
+    # also includes the random-effect variance component as a trailing
+    # entry, which t_test's r_matrix does not cover).
+    fe_names = list(fit.fe_params.index)
+
+    def _param_index(other_label: str) -> int | None:
+        name = _coef_name(other_label)
+        return fe_names.index(name) if name in fe_names else None
+
+    pairwise = []
+    for i in range(len(labels)):
+        for j in range(i + 1, len(labels)):
+            gi, gj = labels[i], labels[j]
+            try:
+                if gi == reference:
+                    idx = _param_index(gj)
+                    if idx is None:
+                        continue
+                    coefficient = float(fit.fe_params.iloc[idx])
+                    p_value = float(fit.pvalues.iloc[idx])
+                elif gj == reference:
+                    idx = _param_index(gi)
+                    if idx is None:
+                        continue
+                    coefficient = -float(fit.fe_params.iloc[idx])
+                    p_value = float(fit.pvalues.iloc[idx])
+                else:
+                    idx_i, idx_j = _param_index(gi), _param_index(gj)
+                    if idx_i is None or idx_j is None:
+                        continue
+                    r_matrix = np.zeros((1, len(fe_names)))
+                    r_matrix[0, idx_j] = 1.0
+                    r_matrix[0, idx_i] = -1.0
+                    test_result = fit.t_test(r_matrix)
+                    coefficient = float(np.asarray(test_result.effect).ravel()[0])
+                    p_value = float(np.asarray(test_result.pvalue).ravel()[0])
+            except Exception:
+                continue
+            pairwise.append({"group_a": gi, "group_b": gj, "coefficient": coefficient, "p_value": p_value})
+
+    if not pairwise:
         return None
 
     residual_shapiro_p = None
@@ -118,86 +237,100 @@ def _fit_lmm(
             residual_shapiro_p = None
 
     return {
-        "lmm_coefficient": float(fit.params[coef_name]),
-        "lmm_p_value": float(fit.pvalues[coef_name]),
         "lmm_converged": bool(fit.converged),
         "lmm_residual_shapiro_p": residual_shapiro_p,
         "lmm_n_clusters": len(unique_clusters),
+        "lmm_pairwise": pairwise,
     }
 
 
-def compare_groups(
-    summaries_a: list[dict],
-    summaries_b: list[dict],
-    label_a: str = "Group A",
-    label_b: str = "Group B",
-    clusters_a: list | None = None,
-    clusters_b: list | None = None,
-) -> dict:
-    """Compare every shared numeric metric between two groups of per-video summaries.
+def compare_groups(groups: list[GroupInput]) -> dict:
+    """Compare every shared numeric metric across two or more groups of per-video summaries.
 
-    clusters_a / clusters_b (optional): a batch/sample label per entry in
-    summaries_a / summaries_b, same length and order. When given, each
-    metric additionally gets a linear-mixed-model p-value alongside the
-    default Mann-Whitney U, correcting for repeated measurements sharing a
-    cluster label. Mann-Whitney U is still always computed and remains the
-    primary `p_value` field, so behavior without cluster labels is
-    unchanged.
+    Each group's `clusters` (optional): a batch/sample label per entry in
+    that group's summaries, same length and order. When every group has
+    cluster labels, each metric additionally gets cluster-aware linear
+    mixed-model pairwise p-values alongside the default rank-based test
+    (Mann-Whitney U for 2 groups, Kruskal-Wallis + Dunn's post-hoc for 3+),
+    correcting for repeated measurements sharing a cluster label.
     """
-    keys = set()
-    for s in summaries_a + summaries_b:
-        for k, v in s.items():
-            if k in _EXCLUDED_METRICS:
-                continue
-            if isinstance(v, bool) or not isinstance(v, (int, float)):
-                continue
-            keys.add(k)
+    if len(groups) < 2:
+        raise ValueError("compare_groups needs at least 2 groups")
 
+    keys = set()
+    for g in groups:
+        for s in g.summaries:
+            for k, v in s.items():
+                if k in _EXCLUDED_METRICS:
+                    continue
+                if isinstance(v, bool) or not isinstance(v, (int, float)):
+                    continue
+                keys.add(k)
+
+    labels = [g.label for g in groups]
     metrics = []
     for key in sorted(keys):
-        vals_a, clus_a = _numeric_values_with_clusters(summaries_a, key, clusters_a)
-        vals_b, clus_b = _numeric_values_with_clusters(summaries_b, key, clusters_b)
-        if len(vals_a) == 0 or len(vals_b) == 0:
+        per_group_vals: list[list[float]] = []
+        per_group_clusters: list[list] = []
+        for g in groups:
+            vals, clus = _numeric_values_with_clusters(g.summaries, key, g.clusters)
+            per_group_vals.append(vals)
+            per_group_clusters.append(clus)
+        if any(len(v) == 0 for v in per_group_vals):
             continue
 
-        p_value = None
-        statistic = None
-        if len(set(vals_a)) > 1 or len(set(vals_b)) > 1:
-            try:
-                result = stats.mannwhitneyu(vals_a, vals_b, alternative="two-sided")
-                statistic = float(result.statistic)
-                p_value = float(result.pvalue)
-            except ValueError:
-                pass
-
-        entry = {
+        entry: dict = {
             "metric": key,
-            "n_a": len(vals_a),
-            "mean_a": float(np.mean(vals_a)),
-            "std_a": float(np.std(vals_a, ddof=1)) if len(vals_a) > 1 else 0.0,
-            "values_a": vals_a,
-            "n_b": len(vals_b),
-            "mean_b": float(np.mean(vals_b)),
-            "std_b": float(np.std(vals_b, ddof=1)) if len(vals_b) > 1 else 0.0,
-            "values_b": vals_b,
-            "statistic": statistic,
-            "p_value": p_value,
+            "groups": [
+                {
+                    "label": label,
+                    "n": len(vals),
+                    "mean": float(np.mean(vals)),
+                    "std": float(np.std(vals, ddof=1)) if len(vals) > 1 else 0.0,
+                    "values": vals,
+                }
+                for label, vals in zip(labels, per_group_vals)
+            ],
         }
 
-        lmm = _fit_lmm(vals_a, clus_a, vals_b, clus_b)
+        has_variance = len({v for vals in per_group_vals for v in vals}) > 1
+
+        if len(groups) == 2:
+            entry["test"] = "mann_whitney_u"
+            entry["statistic"] = None
+            entry["p_value"] = None
+            if has_variance:
+                try:
+                    result = stats.mannwhitneyu(per_group_vals[0], per_group_vals[1], alternative="two-sided")
+                    entry["statistic"] = float(result.statistic)
+                    entry["p_value"] = float(result.pvalue)
+                except ValueError:
+                    pass
+        else:
+            entry["test"] = "kruskal_wallis"
+            entry["statistic"] = None
+            entry["p_value"] = None
+            if has_variance:
+                try:
+                    result = stats.kruskal(*per_group_vals)
+                    entry["statistic"] = float(result.statistic)
+                    entry["p_value"] = float(result.pvalue)
+                except ValueError:
+                    pass
+            entry["posthoc"] = _dunns_posthoc(labels, per_group_vals) if entry["p_value"] is not None else None
+
+        lmm = _fit_lmm_pairwise(labels, per_group_vals, per_group_clusters)
         if lmm is not None:
             entry.update(lmm)
 
         metrics.append(entry)
 
-    # Most-significant-first (by the primary Mann-Whitney U p-value) so the
+    # Most-significant-first (by the primary omnibus p-value) so the
     # interesting differences surface immediately.
     metrics.sort(key=lambda m: (m["p_value"] is None, m["p_value"] if m["p_value"] is not None else 0.0))
 
     return {
-        "label_a": label_a,
-        "label_b": label_b,
-        "n_videos_a": len(summaries_a),
-        "n_videos_b": len(summaries_b),
+        "labels": labels,
+        "n_videos": [g.n_videos for g in groups],
         "metrics": metrics,
     }
