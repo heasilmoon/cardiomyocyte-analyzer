@@ -7,7 +7,7 @@ import uuid
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -21,7 +21,7 @@ from app.analysis.group_stats import compare_groups
 from app.analysis.morphology import analyze_morphology_2d, analyze_morphology_3d
 from app.analysis.validation_stats import compute_agreement
 from app.config import FRONTEND_DIR, MAX_FRAMES, MAX_UPLOAD_BYTES, RESULTS_DIR, UPLOADS_DIR
-from app.utils.video_io import VideoLoadError, read_video_frames
+from app.utils.video_io import VideoLoadError, extract_first_frame_png, read_video_frames
 
 app = FastAPI(title="Cardiomyocyte Analyzer", version="0.1.0")
 
@@ -67,6 +67,34 @@ def _load_frames(path: Path, fps_override: float | None):
     return frames, fps
 
 
+def _apply_roi(
+    frames,
+    roi_x: int | None,
+    roi_y: int | None,
+    roi_w: int | None,
+    roi_h: int | None,
+) -> tuple[object, dict | None]:
+    """Crop frames to a user-selected region of interest, if one was given.
+
+    Coordinates are pixel offsets in the *original* (uncropped) frame, top
+    -left origin — what the frontend's ROI canvas reports. Clamped to the
+    frame bounds rather than rejected outright, since a rectangle drawn
+    against a downscaled canvas preview can round to just outside the
+    native frame edge by a pixel or two. Returns (frames, applied_roi) so
+    the caller can report back exactly what was used (None if no ROI was
+    given, or if the request omitted any of the four fields).
+    """
+    if roi_x is None or roi_y is None or roi_w is None or roi_h is None:
+        return frames, None
+    _, h, w = frames.shape
+    x0 = max(0, min(int(roi_x), w - 1))
+    y0 = max(0, min(int(roi_y), h - 1))
+    x1 = max(x0 + 1, min(int(roi_x) + int(roi_w), w))
+    y1 = max(y0 + 1, min(int(roi_y) + int(roi_h), h))
+    cropped = frames[:, y0:y1, x0:x1]
+    return cropped, {"x": x0, "y": y0, "w": x1 - x0, "h": y1 - y0}
+
+
 def _new_result_dir() -> tuple[str, Path]:
     result_id = uuid.uuid4().hex
     result_dir = RESULTS_DIR / result_id
@@ -86,6 +114,21 @@ def _urls(result_id: str, result_dir: Path) -> dict:
     }
 
 
+@app.post("/api/preview_frame")
+async def preview_frame_endpoint(file: UploadFile = File(...)):
+    """First frame of an uploaded video, PNG-encoded — used by the frontend's
+    ROI-selection canvas so the preview always matches what the analysis
+    pipeline itself can decode (see extract_first_frame_png)."""
+    upload_path = _save_upload(file)
+    try:
+        png_bytes = extract_first_frame_png(str(upload_path))
+    except VideoLoadError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        upload_path.unlink(missing_ok=True)
+    return Response(content=png_bytes, media_type="image/png")
+
+
 @app.post("/api/analyze/beating")
 async def analyze_beating_endpoint(
     file: UploadFile = File(...),
@@ -96,10 +139,15 @@ async def analyze_beating_endpoint(
     reference_index: int | None = Form(default=None),
     piv_window_size: int = Form(default=32),
     piv_step: int | None = Form(default=None),
+    roi_x: int | None = Form(default=None),
+    roi_y: int | None = Form(default=None),
+    roi_w: int | None = Form(default=None),
+    roi_h: int | None = Form(default=None),
 ):
     upload_path = _save_upload(file)
     try:
         frames, fps = _load_frames(upload_path, fps_override)
+        frames, applied_roi = _apply_roi(frames, roi_x, roi_y, roi_w, roi_h)
         result = analyze_beating(
             frames,
             fps,
@@ -118,7 +166,12 @@ async def analyze_beating_endpoint(
     (result_dir / "summary.json").write_text(json.dumps(result.summary, indent=2))
     plotting.plot_beating(result, str(result_dir / "plot.png"))
 
-    return {"result_id": result_id, "summary": result.summary, "urls": _urls(result_id, result_dir)}
+    return {
+        "result_id": result_id,
+        "summary": result.summary,
+        "urls": _urls(result_id, result_dir),
+        "roi": applied_roi,
+    }
 
 
 @app.post("/api/analyze/calcium")
@@ -127,10 +180,15 @@ async def analyze_calcium_endpoint(
     fps_override: float | None = Form(default=None),
     min_transients_per_min: float = Form(default=240.0),
     prominence_frac: float = Form(default=0.2),
+    roi_x: int | None = Form(default=None),
+    roi_y: int | None = Form(default=None),
+    roi_w: int | None = Form(default=None),
+    roi_h: int | None = Form(default=None),
 ):
     upload_path = _save_upload(file)
     try:
         frames, fps = _load_frames(upload_path, fps_override)
+        frames, applied_roi = _apply_roi(frames, roi_x, roi_y, roi_w, roi_h)
         result = analyze_calcium(
             frames,
             fps,
@@ -145,7 +203,12 @@ async def analyze_calcium_endpoint(
     (result_dir / "summary.json").write_text(json.dumps(result.summary, indent=2))
     plotting.plot_calcium(result, str(result_dir / "plot.png"))
 
-    return {"result_id": result_id, "summary": result.summary, "urls": _urls(result_id, result_dir)}
+    return {
+        "result_id": result_id,
+        "summary": result.summary,
+        "urls": _urls(result_id, result_dir),
+        "roi": applied_roi,
+    }
 
 
 @app.post("/api/analyze/morphology")

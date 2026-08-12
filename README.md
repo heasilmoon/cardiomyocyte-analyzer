@@ -38,6 +38,13 @@ Python(FastAPI + OpenCV + scikit-image) 기반으로, Fiji 전체 배포판(수�
   PIV-MyoMonitor 논문이 8~64px 윈도우와 4~16px 스텝 조합을 직접 비교해서 심장 오가노이드 모델에
   대해 실측으로 확정한 값입니다(윈도우 64px는 인접 창 사이 속도가 끊겨 보였고, 32px 이하에서
   매끈했습니다). 다만 스텝을 줄이면 창 개수가 늘어 계산 시간도 늘어난다는 점은 감안하세요.
+- **관심영역(ROI) 선택**: 박동/칼슘 이미징 탭에서 영상을 고르면 첫 프레임 미리보기가 나타나고,
+  마우스로 드래그해서 분석할 영역만 지정할 수 있습니다(지정하지 않으면 전체 프레임 사용). 배경/
+  organoid의 어두운 중심부처럼 신호가 없거나 신뢰할 수 없는 영역을 미리 제외하면 특히 PIV 모드에서
+  결과가 더 안정적입니다. 미리보기는 브라우저의 `<video>` 태그가 아니라 백엔드가 실제 분석에 쓰는
+  것과 같은 OpenCV 디코더로 첫 프레임을 추출해서 보여줍니다 — 이 프로젝트의 합성 테스트 영상처럼
+  일부 코덱(MPEG-4 Part 2 등)은 브라우저 `<video>`가 재생하지 못하는 경우가 있어서, 미리보기가
+  실제 분석 가능 여부와 어긋나지 않도록 한 선택입니다.
 - **칼슘 이미징 분석 (Calcium imaging)**: 형광 강도 트레이스를 ΔF/F0로 정규화하고 각 트랜지언트의
   피크 시각, 진폭, rise time(10–90%), 지수 감쇠 시간상수(τ)를 계산합니다.
 - **형태 분석 (Morphology, 2D/3D)**: 2D는 대표 이미지(최대 강도 투영)를, 3D는 영상의 각 프레임을
@@ -93,17 +100,20 @@ docker run -p 8000:8000 cardiomyocyte-analyzer
 
 | Endpoint | 설명 |
 |---|---|
-| `POST /api/analyze/beating` | `file`(mp4), `fps_override`, `min_bpm_gap`(선택, 비우면 자동 추정), `prominence_frac`, `signal_mode`(`reference`/`consecutive`/`piv`), `reference_index`, `piv_window_size`(기본 32px), `piv_step`(기본 window_size/2) |
-| `POST /api/analyze/calcium` | `file`(mp4), `fps_override`, `min_transients_per_min`, `prominence_frac` |
+| `POST /api/analyze/beating` | `file`(mp4), `fps_override`, `min_bpm_gap`(선택, 비우면 자동 추정), `prominence_frac`, `signal_mode`(`reference`/`consecutive`/`piv`), `reference_index`, `piv_window_size`(기본 32px), `piv_step`(기본 window_size/2), `roi_x`/`roi_y`/`roi_w`/`roi_h`(선택, 관심영역 픽셀 좌표) |
+| `POST /api/analyze/calcium` | `file`(mp4), `fps_override`, `min_transients_per_min`, `prominence_frac`, `roi_x`/`roi_y`/`roi_w`/`roi_h`(선택) |
 | `POST /api/analyze/morphology` | `file`(mp4), `mode`(`2d`/`3d`), `min_object_size`, `separate_touching`, `separation_min_distance`, `compute_texture_alignment` |
 | `POST /api/analyze/compare` | `analysis_type`(`beating`/`calcium`/`morphology`), `morphology_mode`, `group_a_label`, `group_b_label`, `group_a_files`(다중), `group_b_files`(다중), `group_a_batches`(선택, 줄바꿈/쉼표로 구분된 배치 라벨), `group_b_batches` |
 | `POST /api/analyze/batch` | `analysis_type`, `morphology_mode`, `files`(다중) — 영상별 결과를 CSV 하나로 |
 | `POST /api/analyze/colocalization` | `channel_a_file`, `channel_b_file`, `label_a`, `label_b` |
 | `POST /api/validate/agreement` | `file`(CSV), `column_a`, `column_b`, `label_a`, `label_b` |
+| `POST /api/preview_frame` | `file`(mp4) — 첫 프레임을 PNG로 반환 (프론트엔드 ROI 선택기용) |
 
 단일 분석 엔드포인트는 `{result_id, summary, urls: {plot, csv, summary}}` 형태의 JSON을,
 `/compare`는 `{result_id, comparison, urls}` 형태를 반환합니다. `urls`는 `/results/...` 하위의
-정적 파일 경로입니다.
+정적 파일 경로입니다. `/api/analyze/beating`과 `/api/analyze/calcium`은 ROI가 지정된 경우
+`{"roi": {"x":.., "y":.., "w":.., "h":..}}`(실제 적용된, 프레임 경계에 맞춰 clamp된 값)를,
+지정되지 않았으면 `"roi": null`을 함께 반환합니다.
 
 ## 테스트
 
@@ -123,8 +133,9 @@ pytest tests/ -v
 
 - **픽셀/복셀 단위**: 영상 자체에는 물리적 스케일(µm/px) 정보가 없으므로 모든 크기 지표는
   픽셀·복셀 단위입니다. 캘리브레이션 값을 입력받아 환산하는 기능은 아직 없습니다.
-- **ROI 선택**: 칼슘 이미징은 현재 전체 프레임 평균 강도를 사용합니다. 특정 세포/영역만 골라
-  분석하는 ROI 드로잉 UI는 향후 추가가 필요합니다.
+- **ROI 선택은 사각형만 지원합니다**: 박동/칼슘 이미징 탭에서 마우스로 드래그해 관심영역을
+  지정할 수 있지만, 사각형 하나만 가능합니다(자유곡선 선택이나 여러 영역 동시 선택은 없음).
+  형태 분석(morphology)에는 아직 ROI 기능이 없습니다.
 - **기준 프레임 자동 선택**: 박동 분석의 `reference` 모드는 기준 프레임을 자동으로(가장 넓은
   저모션 구간의 중앙 프레임) 고릅니다. 영상이 매우 짧거나 이완기 구간이 거의 없으면 잘못된 프레임이
   선택될 수 있으니, 그런 경우 `reference_index`를 직접 지정하세요.

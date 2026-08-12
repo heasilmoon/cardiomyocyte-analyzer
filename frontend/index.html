@@ -67,6 +67,22 @@
           </div>
         </div>
         <div class="form-row">
+          <div class="field roi-field">
+            <label>관심영역(ROI) 선택 (선택사항)</label>
+            <p class="roi-hint">영상을 선택하면 첫 프레임이 아래 나타납니다. 마우스로 드래그해서 분석할
+            영역만 지정할 수 있어요(예: 배경/어두운 영역 제외). 지정하지 않으면 전체 화면을 씁니다.</p>
+            <canvas class="roi-canvas"></canvas>
+            <div class="roi-controls">
+              <span class="roi-status">전체 화면 사용 중</span>
+              <button type="button" class="roi-reset">ROI 초기화</button>
+            </div>
+            <input type="hidden" name="roi_x" />
+            <input type="hidden" name="roi_y" />
+            <input type="hidden" name="roi_w" />
+            <input type="hidden" name="roi_h" />
+          </div>
+        </div>
+        <div class="form-row">
           <button class="primary" type="submit">분석 시작</button>
         </div>
       </form>
@@ -94,6 +110,24 @@
             <label>피크 민감도 (0-1)</label>
             <input type="number" name="prominence_frac" value="0.2" step="0.01" min="0" max="1" />
           </div>
+        </div>
+        <div class="form-row">
+          <div class="field roi-field">
+            <label>관심영역(ROI) 선택 (선택사항)</label>
+            <p class="roi-hint">영상을 선택하면 첫 프레임이 아래 나타납니다. 마우스로 드래그해서 분석할
+            영역만 지정할 수 있어요. 지정하지 않으면 전체 화면을 씁니다.</p>
+            <canvas class="roi-canvas"></canvas>
+            <div class="roi-controls">
+              <span class="roi-status">전체 화면 사용 중</span>
+              <button type="button" class="roi-reset">ROI 초기화</button>
+            </div>
+            <input type="hidden" name="roi_x" />
+            <input type="hidden" name="roi_y" />
+            <input type="hidden" name="roi_w" />
+            <input type="hidden" name="roi_h" />
+          </div>
+        </div>
+        <div class="form-row">
           <button class="primary" type="submit">분석 시작</button>
         </div>
       </form>
