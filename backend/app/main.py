@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import base64
 import io
 import json
+import os
 import re
+import secrets
 import uuid
 from pathlib import Path
 from typing import Literal
@@ -11,6 +14,7 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, Response, Uploa
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.datastructures import UploadFile as StarletteUploadFile
+from starlette.middleware.base import BaseHTTPMiddleware
 
 import pandas as pd
 
@@ -32,6 +36,46 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class BasicAuthMiddleware(BaseHTTPMiddleware):
+    """Password-gate the whole app (frontend + API + /results files).
+
+    A FastAPI Depends()-based check only runs for path operations — it
+    would never fire for app.mount("/", ...) or app.mount("/results", ...)
+    below, since a Mount is a separate ASGI app that bypasses normal
+    dependency injection entirely. Middleware wraps every request
+    regardless of routing, so it's the only way to actually cover the
+    static frontend and other users' result files too.
+
+    Enabled only when APP_PASSWORD is set (e.g. in Render's Environment
+    tab) — unset locally, this is a no-op so `uvicorn --reload` keeps
+    working without extra setup. GET /api/health is always left open so
+    hosting platforms can health-check the service without credentials.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        password = os.environ.get("APP_PASSWORD")
+        if not password or request.url.path == "/api/health":
+            return await call_next(request)
+
+        username = os.environ.get("APP_USERNAME", "myteam")
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Basic "):
+            try:
+                decoded = base64.b64decode(auth_header[len("Basic ") :]).decode("utf-8")
+                given_user, _, given_password = decoded.partition(":")
+            except Exception:
+                given_user, given_password = "", ""
+            if secrets.compare_digest(given_user, username) and secrets.compare_digest(
+                given_password, password
+            ):
+                return await call_next(request)
+
+        return Response(status_code=401, headers={"WWW-Authenticate": 'Basic realm="Cardiomyocyte Analyzer"'})
+
+
+app.add_middleware(BasicAuthMiddleware)
 
 app.mount("/results", StaticFiles(directory=str(RESULTS_DIR)), name="results")
 

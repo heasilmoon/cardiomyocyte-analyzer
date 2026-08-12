@@ -99,6 +99,25 @@ docker build -f backend/Dockerfile -t cardiomyocyte-analyzer .
 docker run -p 8000:8000 cardiomyocyte-analyzer
 ```
 
+### 인터넷에 공개할 때 비밀번호로 보호하기
+
+Render 같은 곳에 배포해서 외부에서 접근 가능한 URL이 생기면, 실험 데이터가 담긴 결과 파일이
+누구나 볼 수 있는 상태가 됩니다. 환경변수 `APP_PASSWORD`를 설정하면 앱 전체(프론트엔드 화면,
+API, `/results/*` 결과 파일 전부)가 HTTP Basic 인증으로 잠깁니다 — Render의 "Environment" 탭에서
+`APP_PASSWORD`(필수)와 `APP_USERNAME`(선택, 기본값 `myteam`)을 추가하면 됩니다. 이 값을 설정하지
+않으면(로컬 개발 시 기본 상태) 인증 없이 그대로 동작합니다. `GET /api/health`는 호스팅 플랫폼의
+헬스체크를 위해 항상 인증 없이 열려 있습니다.
+
+인증 로직을 FastAPI의 `Depends()`가 아니라 **미들웨어**로 구현한 이유가 있습니다 —
+`app.mount("/", ...)`(프론트엔드)와 `app.mount("/results", ...)`(결과 파일)는 각각 별도의 ASGI
+서브 앱이라서, 개별 API 경로에만 거는 `Depends()` 인증은 이 두 mount를 그냥 지나쳐 갑니다. 즉
+`Depends()` 방식으로는 API 호출은 막혀도 프론트엔드 화면과 (다른 사람의 것을 포함한) 결과 파일은
+그대로 인증 없이 노출됩니다. 미들웨어는 라우팅과 무관하게 모든 요청을 감싸므로 이 문제가 없습니다.
+
+HTTP Basic 인증은 자격증명을 base64로만 인코딩할 뿐 암호화하지 않으므로, **반드시 HTTPS URL로만
+접속하세요**(Render가 기본 제공하는 `https://...onrender.com` 주소면 안전합니다 — `http://`로 직접
+접속하면 안 됩니다).
+
 ## API
 
 | Endpoint | 설명 |
