@@ -102,7 +102,7 @@ function formatValue(v) {
 }
 
 function renderResults(container, data) {
-  const { summary, urls } = data;
+  const { summary, urls, roi } = data;
   const rows = Object.entries(summary)
     .map(([k, v]) => `<tr><td>${fieldLabel(k)}</td><td>${formatValue(v)}</td></tr>`)
     .join("");
@@ -116,8 +116,13 @@ function renderResults(container, data) {
       </div>`
     : "";
 
+  const roiNote = roi
+    ? `<p class="roi-applied-note">적용된 ROI: (${roi.x}, ${roi.y}), ${roi.w}×${roi.h}px (전체 영상이 아닌 이 영역만 분석했습니다)</p>`
+    : "";
+
   container.innerHTML = `
     ${pivWarning}
+    ${roiNote}
     ${urls.plot ? `<img src="${API_BASE}${urls.plot}" alt="result plot" />` : ""}
     <table class="summary">${rows}</table>
     <div class="links">
@@ -136,6 +141,151 @@ if (beatingSignalMode) {
   beatingSignalMode.addEventListener("change", syncPivFieldsVisibility);
   syncPivFieldsVisibility();
 }
+
+function initRoiSelector(panelId) {
+  const panel = document.getElementById(`panel-${panelId}`);
+  if (!panel) return;
+  const fileInput = panel.querySelector('input[type="file"][name="file"]');
+  const canvas = panel.querySelector(".roi-canvas");
+  const statusEl = panel.querySelector(".roi-status");
+  const resetBtn = panel.querySelector(".roi-reset");
+  const roiX = panel.querySelector('input[name="roi_x"]');
+  const roiY = panel.querySelector('input[name="roi_y"]');
+  const roiW = panel.querySelector('input[name="roi_w"]');
+  const roiH = panel.querySelector('input[name="roi_h"]');
+  if (!fileInput || !canvas || !roiX || !roiY || !roiW || !roiH) return;
+
+  const ctx = canvas.getContext("2d");
+  // Preview goes through the backend (POST /api/preview_frame) rather than
+  // a browser <video> element: OpenCV can decode codecs (e.g. MPEG-4 Part 2
+  // "mp4v", which this project's own test fixtures use) that Chromium/most
+  // browsers silently fail to play, so a native <video>-based preview would
+  // work for some videos and not others in a way that doesn't match what
+  // the analysis backend actually supports.
+  let previewImage = null;
+
+  let naturalWidth = 0;
+  let naturalHeight = 0;
+  let drawing = false;
+  let startX = 0;
+  let startY = 0;
+  let rect = null; // {x, y, w, h} in native (original video) pixel coordinates
+
+  function redraw() {
+    if (!naturalWidth || !previewImage) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(previewImage, 0, 0, canvas.width, canvas.height);
+    if (rect) {
+      const scaleX = canvas.width / naturalWidth;
+      const scaleY = canvas.height / naturalHeight;
+      ctx.strokeStyle = "#e0554f";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(rect.x * scaleX, rect.y * scaleY, rect.w * scaleX, rect.h * scaleY);
+      ctx.fillStyle = "rgba(224, 85, 79, 0.18)";
+      ctx.fillRect(rect.x * scaleX, rect.y * scaleY, rect.w * scaleX, rect.h * scaleY);
+    }
+  }
+
+  function clearRoi() {
+    rect = null;
+    roiX.value = "";
+    roiY.value = "";
+    roiW.value = "";
+    roiH.value = "";
+    statusEl.textContent = "전체 화면 사용 중";
+    redraw();
+  }
+
+  fileInput.addEventListener("change", async () => {
+    const file = fileInput.files && fileInput.files[0];
+    naturalWidth = 0;
+    naturalHeight = 0;
+    previewImage = null;
+    canvas.style.display = "none";
+    clearRoi();
+    if (!file) return;
+
+    statusEl.textContent = "미리보기 불러오는 중...";
+    try {
+      const previewFormData = new FormData();
+      previewFormData.append("file", file);
+      const res = await fetch(`${API_BASE}/api/preview_frame`, { method: "POST", body: previewFormData });
+      if (!res.ok) throw new Error("preview failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const img = new Image();
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+        img.src = url;
+      });
+      URL.revokeObjectURL(url);
+
+      previewImage = img;
+      naturalWidth = img.naturalWidth;
+      naturalHeight = img.naturalHeight;
+      const maxDisplayWidth = 480;
+      const scale = naturalWidth > maxDisplayWidth ? maxDisplayWidth / naturalWidth : 1;
+      canvas.width = Math.round(naturalWidth * scale);
+      canvas.height = Math.round(naturalHeight * scale);
+      canvas.style.display = "block";
+      statusEl.textContent = "전체 화면 사용 중";
+      redraw();
+    } catch (err) {
+      statusEl.textContent = "미리보기를 불러올 수 없습니다 (ROI 없이 전체 화면으로 분석은 정상 진행됩니다)";
+    }
+  });
+
+  function eventToNativeCoords(evt) {
+    const bounds = canvas.getBoundingClientRect();
+    const cx = ((evt.clientX - bounds.left) / bounds.width) * canvas.width;
+    const cy = ((evt.clientY - bounds.top) / bounds.height) * canvas.height;
+    return {
+      x: cx * (naturalWidth / canvas.width),
+      y: cy * (naturalHeight / canvas.height),
+    };
+  }
+
+  canvas.addEventListener("mousedown", (evt) => {
+    if (!naturalWidth) return;
+    const pos = eventToNativeCoords(evt);
+    drawing = true;
+    startX = pos.x;
+    startY = pos.y;
+  });
+
+  canvas.addEventListener("mousemove", (evt) => {
+    if (!drawing) return;
+    const pos = eventToNativeCoords(evt);
+    rect = {
+      x: Math.max(0, Math.min(startX, pos.x)),
+      y: Math.max(0, Math.min(startY, pos.y)),
+      w: Math.abs(pos.x - startX),
+      h: Math.abs(pos.y - startY),
+    };
+    redraw();
+  });
+
+  window.addEventListener("mouseup", () => {
+    if (!drawing) return;
+    drawing = false;
+    if (rect && rect.w >= 4 && rect.h >= 4) {
+      roiX.value = Math.round(rect.x);
+      roiY.value = Math.round(rect.y);
+      roiW.value = Math.round(rect.w);
+      roiH.value = Math.round(rect.h);
+      statusEl.textContent = `ROI: (${roiX.value}, ${roiY.value}), ${roiW.value}×${roiH.value}px`;
+    } else {
+      rect = null;
+      redraw();
+    }
+  });
+
+  resetBtn.addEventListener("click", clearRoi);
+}
+
+initRoiSelector("beating");
+initRoiSelector("calcium");
 
 const compareAnalysisType = document.getElementById("compare-analysis-type");
 const compareMorphologyModeField = document.getElementById("compare-morphology-mode-field");

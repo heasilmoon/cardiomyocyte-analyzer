@@ -88,6 +88,31 @@ nav.tabs button.active {
   font-size: 0.9rem;
 }
 
+.roi-field { max-width: 100%; }
+.roi-hint { font-size: 0.8rem; color: var(--muted); margin: 0 0 0.4rem; max-width: 480px; }
+.roi-canvas {
+  display: none;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: crosshair;
+}
+.roi-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.4rem;
+}
+.roi-status { font-size: 0.8rem; color: var(--muted); }
+.roi-reset {
+  font-size: 0.8rem;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+
 button.primary {
   background: var(--accent);
   color: white;
@@ -104,6 +129,7 @@ button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .results { margin-top: 1.5rem; }
 .results img { max-width: 100%; border: 1px solid var(--border); border-radius: 6px; }
+.roi-applied-note { font-size: 0.85rem; color: var(--muted); margin: 0 0 0.75rem; }
 
 .warning-banner {
   background: #fff3cd;

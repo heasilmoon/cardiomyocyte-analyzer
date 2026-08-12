@@ -102,6 +102,21 @@ def _time_to_decay(
     return None
 
 
+def _safe_mean(values) -> float | None:
+    """Mean of a column/array, treating NaN/None as missing rather than as 0.
+
+    Plain `.mean()` (or `.dropna().mean()` on an all-null column) returns
+    NaN, not None, when every value is missing — e.g. a beat whose
+    relaxation segment never actually decays 90% of the way back to
+    baseline before the next beat starts. A NaN silently breaks JSON
+    serialization of the response (FastAPI/Starlette reject it), so this
+    treats "no valid values" as None instead of propagating NaN.
+    """
+    arr = np.asarray(values, dtype=float)
+    arr = arr[~np.isnan(arr)]
+    return float(arr.mean()) if arr.size else None
+
+
 def pick_reference_frame(frames: np.ndarray, fps: float = 30.0) -> int:
     """Pick a resting/diastolic frame to use as the MUSCLEMOTION-style reference.
 
@@ -273,33 +288,23 @@ def analyze_beating(
         "mean_inter_beat_interval_s": float(ibis.mean()) if len(ibis) else None,
         "ibi_std_s": float(ibis.std()) if len(ibis) else None,
         "ibi_cv_percent": float(100.0 * ibis.std() / ibis.mean()) if len(ibis) and ibis.mean() else None,
-        "mean_amplitude": float(amplitudes.mean()) if len(amplitudes) else None,
+        "mean_amplitude": _safe_mean(amplitudes),
         "amplitude_cv_percent": (
             float(100.0 * amplitudes.std() / amplitudes.mean())
             if len(amplitudes) and amplitudes.mean()
             else None
         ),
-        "mean_contraction_time_s": (
-            float(beats_df["contraction_time_s"].mean()) if len(beats_df) else None
-        ),
-        "mean_relaxation_time_s": (
-            float(beats_df["relaxation_time_s"].dropna().mean()) if len(beats_df) else None
-        ),
+        "mean_contraction_time_s": _safe_mean(beats_df["contraction_time_s"]) if len(beats_df) else None,
+        "mean_relaxation_time_s": _safe_mean(beats_df["relaxation_time_s"]) if len(beats_df) else None,
         "mean_max_contraction_velocity": (
-            float(beats_df["max_contraction_velocity"].dropna().mean()) if len(beats_df) else None
+            _safe_mean(beats_df["max_contraction_velocity"]) if len(beats_df) else None
         ),
         "mean_max_relaxation_velocity": (
-            float(beats_df["max_relaxation_velocity"].dropna().mean()) if len(beats_df) else None
+            _safe_mean(beats_df["max_relaxation_velocity"]) if len(beats_df) else None
         ),
-        "mean_time_to_decay_10_s": (
-            float(beats_df["time_to_decay_10_s"].dropna().mean()) if len(beats_df) else None
-        ),
-        "mean_time_to_decay_50_s": (
-            float(beats_df["time_to_decay_50_s"].dropna().mean()) if len(beats_df) else None
-        ),
-        "mean_time_to_decay_90_s": (
-            float(beats_df["time_to_decay_90_s"].dropna().mean()) if len(beats_df) else None
-        ),
+        "mean_time_to_decay_10_s": _safe_mean(beats_df["time_to_decay_10_s"]) if len(beats_df) else None,
+        "mean_time_to_decay_50_s": _safe_mean(beats_df["time_to_decay_50_s"]) if len(beats_df) else None,
+        "mean_time_to_decay_90_s": _safe_mean(beats_df["time_to_decay_90_s"]) if len(beats_df) else None,
     }
 
     piv_field = None

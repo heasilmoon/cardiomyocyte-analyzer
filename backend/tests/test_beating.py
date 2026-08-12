@@ -1,6 +1,8 @@
+import json
+
 import numpy as np
 
-from app.analysis.beating import analyze_beating, compute_motion_signal
+from app.analysis.beating import _safe_mean, analyze_beating, compute_motion_signal
 
 
 def _make_pulsing_frames(n_frames=180, fps=30.0, hz=1.0, size=40, textured=False):
@@ -98,6 +100,35 @@ def test_analyze_beating_non_piv_modes_have_no_vector_field():
     frames = _make_pulsing_frames(n_frames=90, fps=fps, hz=1.0)
     result = analyze_beating(frames, fps, signal_mode="reference")
     assert result.piv_field is None
+
+
+def test_safe_mean_treats_all_nan_as_none_not_nan():
+    assert _safe_mean([]) is None
+    assert _safe_mean([float("nan"), float("nan")]) is None
+    assert _safe_mean([1.0, float("nan"), 3.0]) == 2.0
+
+
+def test_analyze_beating_summary_always_json_serializable_across_crops():
+    # Regression test: analyzing a small/awkward crop of a video (e.g. from
+    # the frontend's ROI selector) previously produced NaN in summary
+    # fields like mean_time_to_decay_90_s whenever every beat's value for
+    # that field was missing (a `.dropna().mean()` on an all-null column
+    # returns NaN, not None) - NaN isn't valid JSON and broke the endpoint
+    # with a 500. json.dumps(..., allow_nan=False) mirrors what
+    # Starlette's JSONResponse does, so this raises exactly if that regresses.
+    fps = 30.0
+    frames = _make_pulsing_frames(n_frames=90, fps=fps, hz=1.0, size=64, textured=True)
+    crops = [
+        frames,
+        frames[:, 5:20, 5:20],
+        frames[:, 16:42, 16:41],
+        frames[:, 30:64, 30:64],
+        frames[:20],
+    ]
+    for cropped in crops:
+        for mode in ("reference", "consecutive"):
+            result = analyze_beating(cropped, fps, signal_mode=mode)
+            json.dumps(result.summary, allow_nan=False)
 
 
 def test_analyze_beating_reports_decay_times_and_start_end_timestamps():
