@@ -172,14 +172,15 @@ def _draw_orientation_map(ax, orientation_map: np.ndarray, coherence_map: np.nda
 
 
 def plot_group_comparison(comparison: dict, out_path: str, max_metrics: int = 12) -> None:
-    """One dot-plot-with-mean-bar panel per metric, group A vs group B.
+    """One dot-plot-with-mean-bar panel per metric, across all groups.
 
     Panels are ordered most-significant-first (comparison["metrics"] is
     already sorted that way) and capped at max_metrics so a summary with
-    many fields doesn't produce an unreadably large grid.
+    many fields doesn't produce an unreadably large grid. Works for any
+    number of groups (2+) — the primary omnibus test is Mann-Whitney U for
+    exactly 2 groups or Kruskal-Wallis for 3+, per compare_groups().
     """
     metrics = comparison["metrics"][:max_metrics]
-    label_a, label_b = comparison["label_a"], comparison["label_b"]
 
     if not metrics:
         fig, ax = plt.subplots(figsize=(4, 2))
@@ -193,17 +194,23 @@ def plot_group_comparison(comparison: dict, out_path: str, max_metrics: int = 12
     nrows = int(np.ceil(len(metrics) / ncols))
     fig, axes = plt.subplots(nrows, ncols, figsize=(4.2 * ncols, 3.2 * nrows), squeeze=False)
 
+    palette = plt.get_cmap("tab10")
+    rng = np.random.default_rng(0)
+
     for idx, m in enumerate(metrics):
         ax = axes[idx // ncols][idx % ncols]
-        rng = np.random.default_rng(0)
-        xa = rng.normal(0, 0.05, len(m["values_a"]))
-        xb = rng.normal(1, 0.05, len(m["values_b"]))
-        ax.scatter(xa, m["values_a"], color="#3498db", alpha=0.8, s=25, zorder=3)
-        ax.scatter(xb, m["values_b"], color="#e67e22", alpha=0.8, s=25, zorder=3)
+        groups = m["groups"]
+        n_groups = len(groups)
+        means = [g["mean"] for g in groups]
+        stds = [g["std"] for g in groups]
+
+        for gi, g in enumerate(groups):
+            xs = rng.normal(gi, 0.05, len(g["values"]))
+            ax.scatter(xs, g["values"], color=palette(gi % 10), alpha=0.8, s=25, zorder=3)
         ax.errorbar(
-            [0, 1],
-            [m["mean_a"], m["mean_b"]],
-            yerr=[m["std_a"], m["std_b"]],
+            range(n_groups),
+            means,
+            yerr=stds,
             fmt="_",
             color="black",
             markersize=20,
@@ -211,18 +218,26 @@ def plot_group_comparison(comparison: dict, out_path: str, max_metrics: int = 12
             capsize=4,
             zorder=4,
         )
-        ax.set_xticks([0, 1])
-        ax.set_xticklabels([label_a, label_b], fontsize=8)
-        ax.set_xlim(-0.5, 1.5)
+        ax.set_xticks(range(n_groups))
+        ax.set_xticklabels([g["label"] for g in groups], fontsize=8, rotation=15 if n_groups > 3 else 0)
+        ax.set_xlim(-0.5, n_groups - 0.5)
+
+        test_label = "MWU" if m["test"] == "mann_whitney_u" else "KW"
         p = m["p_value"]
-        p_text = f"MWU p={p:.3g}" if p is not None else "MWU p=n/a"
+        p_text = f"{test_label} p={p:.3g}" if p is not None else f"{test_label} p=n/a"
         sig = " *" if (p is not None and p < 0.05) else ""
-        lmm_p = m.get("lmm_p_value")
-        lmm_text = ""
-        if lmm_p is not None:
-            lmm_sig = " *" if lmm_p < 0.05 else ""
-            lmm_text = f"\nLMM p={lmm_p:.3g}{lmm_sig} ({m.get('lmm_n_clusters')} clusters)"
-        ax.set_title(f"{m['metric']}\n{p_text}{sig}{lmm_text}", fontsize=9)
+
+        extra = ""
+        posthoc = m.get("posthoc")
+        if posthoc:
+            n_sig = sum(1 for ph in posthoc if ph["p_value_bonferroni"] < 0.05)
+            extra += f"\nDunn's: {n_sig}/{len(posthoc)} sig (Bonf.)"
+        lmm_pairwise = m.get("lmm_pairwise")
+        if lmm_pairwise:
+            n_sig_lmm = sum(1 for pw in lmm_pairwise if pw["p_value"] < 0.05)
+            extra += f"\nLMM: {n_sig_lmm}/{len(lmm_pairwise)} sig ({m.get('lmm_n_clusters')} clusters)"
+
+        ax.set_title(f"{m['metric']}\n{p_text}{sig}{extra}", fontsize=9)
 
     for idx in range(len(metrics), nrows * ncols):
         axes[idx // ncols][idx % ncols].axis("off")

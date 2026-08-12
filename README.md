@@ -55,13 +55,16 @@ Python(FastAPI + OpenCV + scikit-image) 기반으로, Fiji 전체 배포판(수�
   옵션으로 **구조 텐서 기반 정렬도**(Fiji OrientationJ, Cardiotensor와 같은 방식)도 켤 수 있습니다 —
   세그멘테이션 없이 픽셀/voxel 단위로 국소 방향과 coherence(신뢰도)를 계산하므로, sarcomere 줄무늬나
   섬유 조직처럼 개별 세포로 나누기 애매한 텍스처의 정렬도를 볼 때 더 적합합니다.
-- **그룹 통계 비교**: 같은 분석을 여러 영상(그룹 A/B, 예: 대조군 vs 처리군)에 대해 돌린 뒤 각
-  지표를 Mann-Whitney U 검정으로 비교합니다. 그룹별 평균±표준편차, p-value, 지표별 dot plot을
-  제공합니다. 한 샘플(배치/웰)에서 여러 영상을 찍은 경우, 파일 순서대로 배치/샘플 라벨을 넣으면
-  **선형 혼합효과 모델(LMM, `value ~ group + (1|sample)`)**로 샘플 ID를 랜덤효과로 넣어 계산한
-  p-value도 함께 제공합니다 — 같은 샘플의 여러 측정을 독립 표본처럼 취급했을 때 생기는
-  pseudoreplication(거짓양성 증가) 문제를 보정합니다. Lee et al., *Circulation Research*, 2025의
-  통계 방법(R `lmerTest`, REML, 랜덤 절편)과 같은 접근입니다.
+- **그룹 통계 비교**: 같은 분석을 여러 영상(2개 이상의 그룹, 예: 대조군 vs 처리군, 또는 대조군/
+  저용량/고용량)에 대해 돌린 뒤 각 지표를 비교합니다. **그룹이 2개면 Mann-Whitney U**, **3개
+  이상이면 Kruskal-Wallis 전체검정 + Dunn's post-hoc**(그룹 쌍별 비교, 순위 기반이라 Kruskal-Wallis와
+  같은 가정을 공유하며, 다중비교는 Bonferroni로 보정)를 씁니다. 그룹별 평균±표준편차, p-value,
+  지표별 dot plot을 제공합니다. 한 샘플(배치/웰)에서 여러 영상을 찍은 경우, 그룹별로 파일 순서대로
+  배치/샘플 라벨을 넣으면 **선형 혼합효과 모델(LMM, `value ~ group + (1|sample)`)**로 샘플 ID를
+  랜덤효과로 넣어 계산한 p-value를 그룹 쌍마다(그룹이 몇 개든 모든 쌍) 함께 제공합니다 — 같은
+  샘플의 여러 측정을 독립 표본처럼 취급했을 때 생기는 pseudoreplication(거짓양성 증가) 문제를
+  보정합니다. Lee et al., *Circulation Research*, 2025의 통계 방법(R `lmerTest`, REML, 랜덤
+  절편)을 2그룹에서 N그룹으로 일반화한 접근입니다.
 - **Colocalization 분석**: 멀티채널 형광 이미지 두 장(또는 영상의 최대 강도 투영)에서 Pearson
   상관계수, Manders M1/M2(각 채널 신호가 상대 채널과 겹치는 비율, Otsu 임계값 기준), Manders
   overlap coefficient를 계산합니다. RGB 병합 이미지 + 픽셀 강도 산점도를 함께 제공합니다.
@@ -103,7 +106,7 @@ docker run -p 8000:8000 cardiomyocyte-analyzer
 | `POST /api/analyze/beating` | `file`(mp4), `fps_override`, `min_bpm_gap`(선택, 비우면 자동 추정), `prominence_frac`, `signal_mode`(`reference`/`consecutive`/`piv`), `reference_index`, `piv_window_size`(기본 32px), `piv_step`(기본 window_size/2), `roi_x`/`roi_y`/`roi_w`/`roi_h`(선택, 관심영역 픽셀 좌표) |
 | `POST /api/analyze/calcium` | `file`(mp4), `fps_override`, `min_transients_per_min`, `prominence_frac`, `roi_x`/`roi_y`/`roi_w`/`roi_h`(선택) |
 | `POST /api/analyze/morphology` | `file`(mp4), `mode`(`2d`/`3d`), `min_object_size`, `separate_touching`, `separation_min_distance`, `compute_texture_alignment` |
-| `POST /api/analyze/compare` | `analysis_type`(`beating`/`calcium`/`morphology`), `morphology_mode`, `group_a_label`, `group_b_label`, `group_a_files`(다중), `group_b_files`(다중), `group_a_batches`(선택, 줄바꿈/쉼표로 구분된 배치 라벨), `group_b_batches` |
+| `POST /api/analyze/compare` | `analysis_type`(`beating`/`calcium`/`morphology`), `morphology_mode`, 그룹마다 인덱스가 붙은 필드 `group_{i}_label`, `group_{i}_files`(다중), `group_{i}_batches`(선택, 줄바꿈/쉼표로 구분된 배치 라벨) — `i`는 0부터, 그룹 2개 이상(연속 번호일 필요는 없음) |
 | `POST /api/analyze/batch` | `analysis_type`, `morphology_mode`, `files`(다중) — 영상별 결과를 CSV 하나로 |
 | `POST /api/analyze/colocalization` | `channel_a_file`, `channel_b_file`, `label_a`, `label_b` |
 | `POST /api/validate/agreement` | `file`(CSV), `column_a`, `column_b`, `label_a`, `label_b` |
@@ -157,11 +160,12 @@ pytest tests/ -v
   나란히 비교한 적은 없습니다. `texture_alignment_score`(구조 텐서 방식)는 이미지 가장자리에서
   가우시안 필터의 경계 효과로 값이 부정확할 수 있으니, 관심 영역이 이미지 가장자리에 붙어있다면
   주의하세요.
-- **그룹 비교는 2그룹만 지원**: 3그룹 이상 비교(예: 대조군/저용량/고용량)나 ANOVA 등은 아직 없고,
-  `/api/analyze/compare`는 각 그룹의 모든 영상을 해당 분석의 기본 파라미터로만 돌립니다(영상별로
-  `prominence_frac` 등을 따로 맞추려면 단일 분석 엔드포인트로 개별 확인 후 사용하세요). 표본 수가
-  적을 때(그룹당 3개 이하) Mann-Whitney U의 최소 p-value는 통계적으로 0.05 근처에서 막혀 "유의미한
-  차이"를 통계적으로 확정하기 어려울 수 있습니다.
+- **그룹 비교는 각 그룹의 영상을 기본 파라미터로만 분석합니다**: 영상별로 `prominence_frac` 등을
+  따로 맞추려면 단일 분석 엔드포인트로 개별 확인 후 사용하세요. 표본 수가 적을 때(그룹당 3개 이하)
+  Mann-Whitney U/Kruskal-Wallis의 최소 p-value는 통계적으로 0.05 근처에서 막혀 "유의미한 차이"를
+  통계적으로 확정하기 어려울 수 있습니다. Dunn's post-hoc의 Bonferroni 보정은 그룹 수가 많아질수록
+  (쌍의 개수가 조합 폭발하므로) 보수적이 되어 개별 쌍 비교의 검정력이 떨어집니다 — 그룹이 5개를
+  넘어가면 결과 해석에 유의하세요.
 - **LMM은 클러스터(샘플) 수가 적으면 불안정할 수 있습니다**: `lmm_converged`가 `True`여도 분산
   성분 추정이 경계값(0)에 가까우면 statsmodels가 ConvergenceWarning을 낼 수 있습니다 — 클러스터가
   양쪽 그룹 합쳐 6개 미만이면 LMM 결과보다 Mann-Whitney U를 우선 참고하고, 가능하면 클러스터(샘플)
