@@ -109,14 +109,59 @@ API, `/results/*` 결과 파일 전부)가 HTTP Basic 인증으로 잠깁니다 
 헬스체크를 위해 항상 인증 없이 열려 있습니다.
 
 인증 로직을 FastAPI의 `Depends()`가 아니라 **미들웨어**로 구현한 이유가 있습니다 —
-`app.mount("/", ...)`(프론트엔드)와 `app.mount("/results", ...)`(결과 파일)는 각각 별도의 ASGI
-서브 앱이라서, 개별 API 경로에만 거는 `Depends()` 인증은 이 두 mount를 그냥 지나쳐 갑니다. 즉
-`Depends()` 방식으로는 API 호출은 막혀도 프론트엔드 화면과 (다른 사람의 것을 포함한) 결과 파일은
-그대로 인증 없이 노출됩니다. 미들웨어는 라우팅과 무관하게 모든 요청을 감싸므로 이 문제가 없습니다.
+`app.mount("/", ...)`(프론트엔드)는 별도의 ASGI 서브 앱이라서, 개별 API 경로에만 거는 `Depends()`
+인증은 이 mount를 그냥 지나쳐 갑니다. 즉 `Depends()` 방식으로는 API 호출은 막혀도 프론트엔드
+화면은 그대로 인증 없이 노출됩니다. 미들웨어는 라우팅과 무관하게 모든 요청을 감싸므로 이 문제가
+없습니다. (`/results/*` 결과 파일은 원래 별도 mount였지만 아래 Supabase 연동을 위해 일반 라우트로
+바꿔서, 지금은 이 문제 자체가 없습니다 — 다만 방어적으로 미들웨어가 계속 감싸고 있습니다.)
 
 HTTP Basic 인증은 자격증명을 base64로만 인코딩할 뿐 암호화하지 않으므로, **반드시 HTTPS URL로만
 접속하세요**(Render가 기본 제공하는 `https://...onrender.com` 주소면 안전합니다 — `http://`로 직접
 접속하면 안 됩니다).
+
+### 결과 영구 저장하기 (Supabase, 선택사항)
+
+Render 같은 곳의 기본/무료 플랜은 디스크가 **영구 저장이 아닙니다** — 재배포하거나 서비스가
+재시작되면 그동안 `backend/storage/results/`에 쌓인 분석 결과(그래프, CSV, summary.json)가
+사라집니다. [Supabase](https://supabase.com)(무료 플랜 있음)를 연결하면 분석할 때마다 결과가
+Supabase Storage(파일)와 Postgres 테이블(요약 지표)에도 같이 저장되어, 재배포 이후에도
+`/results/<id>/...` 링크가 계속 살아있습니다. 로컬 디스크에 파일이 있으면 그걸 먼저 쓰고, 없으면
+(재배포 후 등) Supabase에서 가져오는 식으로 동작합니다 — 이 값들을 설정하지 않으면 지금까지처럼
+로컬 디스크만 씁니다.
+
+**1. Supabase 프로젝트 만들기**
+1. [supabase.com](https://supabase.com) 에서 가입 → "New Project" 생성 (리전은 아무거나, 무료
+   플랜으로 충분합니다).
+2. 프로젝트 생성이 끝나면 왼쪽 메뉴 **Project Settings → API**로 가서 **Project URL**과
+   **service_role** 키(⚠️ `anon` 키가 아니라 `service_role` 키입니다 — 이 앱은 서버에서만 이 키를
+   쓰므로 안전합니다)를 복사해두세요.
+
+**2. 결과 테이블 만들기**
+왼쪽 메뉴 **SQL Editor**에서 새 쿼리를 열고 아래를 실행하세요.
+```sql
+create table if not exists analysis_results (
+  id text primary key,
+  analysis_type text not null,
+  created_at timestamptz not null default now(),
+  summary jsonb not null
+);
+```
+
+**3. Storage 버킷 만들기**
+왼쪽 메뉴 **Storage** → "New bucket" → 이름을 정확히 `results`로 입력 → **Public bucket 체크는
+끄고(비공개로) 생성**하세요. 이 앱의 비밀번호 보호(위 섹션)가 결과 파일에도 적용되게 하려면
+버킷이 비공개여야 합니다 — 서버가 `service_role` 키로만 파일을 읽고 쓰고, 사용자에게는 항상
+이 앱의 `/results/...` 경로를 통해서만 전달하기 때문입니다.
+
+**4. Render에 연결하기**
+Render 대시보드 → 서비스 → **Environment** 탭에서 아래 두 개를 추가하고 저장(재배포)하세요.
+- `SUPABASE_URL` = 1번에서 복사한 Project URL
+- `SUPABASE_SERVICE_ROLE_KEY` = 1번에서 복사한 service_role 키
+
+두 값이 모두 설정된 순간부터 새로 분석하는 결과부터 Supabase에도 같이 저장됩니다(그 이전에
+로컬에만 저장됐던 결과는 소급 적용되지 않습니다). Supabase 업로드가 실패해도(네트워크 문제 등)
+분석 자체는 항상 정상적으로 끝나고 로컬 결과는 그대로 보여집니다 — Supabase는 어디까지나 보조
+저장소입니다.
 
 ## API
 
