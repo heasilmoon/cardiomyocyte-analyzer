@@ -8,3 +8,4 @@ scikit-image>=0.24
 matplotlib>=3.9
 pandas>=2.2
 statsmodels>=0.14
+supabase>=2.9.0

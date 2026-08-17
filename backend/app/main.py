@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import mimetypes
 import os
 import re
 import secrets
@@ -12,6 +13,7 @@ from typing import Literal
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.datastructures import UploadFile as StarletteUploadFile
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -26,6 +28,7 @@ from app.analysis.group_stats import GroupInput, compare_groups
 from app.analysis.morphology import analyze_morphology_2d, analyze_morphology_3d
 from app.analysis.validation_stats import compute_agreement
 from app.config import FRONTEND_DIR, MAX_FRAMES, MAX_UPLOAD_BYTES, RESULTS_DIR, UPLOADS_DIR
+from app.utils import result_storage
 from app.utils.video_io import VideoLoadError, extract_first_frame_png, read_video_frames
 
 app = FastAPI(title="Cardiomyocyte Analyzer", version="0.1.0")
@@ -77,7 +80,31 @@ class BasicAuthMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(BasicAuthMiddleware)
 
-app.mount("/results", StaticFiles(directory=str(RESULTS_DIR)), name="results")
+
+@app.get("/results/{result_id}/{filename}")
+async def get_result_file(result_id: str, filename: str):
+    """Serve a result file, local disk first, Supabase second.
+
+    This used to be a plain `app.mount("/results", StaticFiles(...))`.
+    It's a real route now because a static mount can only ever serve what
+    happens to still be on local disk — which, on Render's ephemeral
+    filesystem, is nothing after a redeploy. Falling back to
+    result_storage.fetch_result_file() (a no-op if Supabase isn't
+    configured) is what makes results actually survive a redeploy; see
+    result_storage.py and the README's Supabase setup section.
+    """
+    if "/" in result_id or "/" in filename or ".." in result_id or ".." in filename:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    local_path = RESULTS_DIR / result_id / filename
+    if local_path.is_file():
+        return FileResponse(local_path)
+
+    content = result_storage.fetch_result_file(result_id, filename)
+    if content is None:
+        raise HTTPException(status_code=404, detail="Result not found")
+    media_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    return Response(content=content, media_type=media_type)
 
 
 @app.get("/api/health")
@@ -210,6 +237,7 @@ async def analyze_beating_endpoint(
     result.beats_df.to_csv(result_dir / "data.csv", index=False)
     (result_dir / "summary.json").write_text(json.dumps(result.summary, indent=2))
     plotting.plot_beating(result, str(result_dir / "plot.png"))
+    result_storage.upload_result(result_id, result_dir, "beating", result.summary)
 
     return {
         "result_id": result_id,
@@ -247,6 +275,7 @@ async def analyze_calcium_endpoint(
     result.transients_df.to_csv(result_dir / "data.csv", index=False)
     (result_dir / "summary.json").write_text(json.dumps(result.summary, indent=2))
     plotting.plot_calcium(result, str(result_dir / "plot.png"))
+    result_storage.upload_result(result_id, result_dir, "calcium", result.summary)
 
     return {
         "result_id": result_id,
@@ -291,6 +320,7 @@ async def analyze_morphology_endpoint(
     result.objects_df.to_csv(result_dir / "data.csv", index=False)
     (result_dir / "summary.json").write_text(json.dumps(result.summary, indent=2))
     plotting.plot_morphology(result, str(result_dir / "plot.png"))
+    result_storage.upload_result(result_id, result_dir, "morphology", result.summary)
 
     return {"result_id": result_id, "summary": result.summary, "urls": _urls(result_id, result_dir)}
 
@@ -337,6 +367,7 @@ async def analyze_batch_endpoint(
     result_id, result_dir = _new_result_dir()
     pd.DataFrame(summaries).to_csv(result_dir / "data.csv", index=False)
     (result_dir / "summary.json").write_text(json.dumps(summaries, indent=2))
+    result_storage.upload_result(result_id, result_dir, f"batch_{analysis_type}", summaries)
 
     return {"result_id": result_id, "n_videos": len(summaries), "summaries": summaries, "urls": _urls(result_id, result_dir)}
 
@@ -419,6 +450,7 @@ async def analyze_compare_endpoint(request: Request):
     pd.DataFrame(combined_rows).to_csv(result_dir / "data.csv", index=False)
     (result_dir / "summary.json").write_text(json.dumps(comparison, indent=2))
     plotting.plot_group_comparison(comparison, str(result_dir / "plot.png"))
+    result_storage.upload_result(result_id, result_dir, "compare", comparison)
 
     return {"result_id": result_id, "comparison": comparison, "urls": _urls(result_id, result_dir)}
 
@@ -465,6 +497,7 @@ async def validate_agreement_endpoint(
     stats_only = {k: v for k, v in agreement.items() if k not in ("values_a", "values_b", "diffs", "means")}
     (result_dir / "summary.json").write_text(json.dumps(stats_only, indent=2))
     plotting.plot_agreement(agreement, label_a, label_b, str(result_dir / "plot.png"))
+    result_storage.upload_result(result_id, result_dir, "validate_agreement", stats_only)
 
     return {"result_id": result_id, "stats": stats_only, "urls": _urls(result_id, result_dir)}
 
@@ -499,6 +532,7 @@ async def analyze_colocalization_endpoint(
     plotting.plot_colocalization(
         projection_a, projection_b, coloc_stats, label_a, label_b, str(result_dir / "plot.png")
     )
+    result_storage.upload_result(result_id, result_dir, "colocalization", coloc_stats)
 
     return {"result_id": result_id, "stats": coloc_stats, "urls": _urls(result_id, result_dir)}
 
