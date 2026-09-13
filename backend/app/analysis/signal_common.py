@@ -94,3 +94,57 @@ def find_local_min_between(signal: np.ndarray, start: int, end: int) -> int:
         return start
     segment = signal[start:end]
     return start + int(np.argmin(segment))
+
+
+def time_to_decay(
+    time_s: np.ndarray,
+    values: np.ndarray,
+    peak_idx: int,
+    end_idx: int,
+    baseline: float,
+    amplitude: float,
+    fraction: float,
+) -> float | None:
+    """Time after a peak for the signal to decay by `fraction` of its amplitude.
+
+    Shared by the beating (contraction) and calcium-transient analyses.
+    Matches the "time-to-decay T10/T50/T90" parameters reported by
+    PIV-MyoMonitor (Lee et al., 2024, Front. Bioeng. Biotechnol.) — T10 is
+    the (short) time to drop 10% of the way back to baseline, T90 the
+    (longer) time to drop 90% of the way. The crossing point is linearly
+    interpolated between the two bracketing samples rather than snapped to
+    the nearest frame, since frame spacing alone can be coarse relative to
+    the decay itself at low fps.
+
+    Returns None if the amplitude is non-positive or the signal never
+    reaches the target level before `end_idx` (e.g. a truncated final
+    beat/transient).
+    """
+    if amplitude <= 0 or end_idx <= peak_idx:
+        return None
+    target = baseline + (1.0 - fraction) * amplitude
+    for k in range(peak_idx, end_idx):
+        v0, v1 = values[k], values[k + 1]
+        if v1 <= target:
+            if v0 == v1:
+                t_cross = time_s[k]
+            else:
+                frac = (v0 - target) / (v0 - v1)
+                t_cross = time_s[k] + frac * (time_s[k + 1] - time_s[k])
+            return float(t_cross - time_s[peak_idx])
+    return None
+
+
+def safe_mean(values) -> float | None:
+    """Mean of a column/array, treating NaN/None as missing rather than as 0.
+
+    Plain `.mean()` (or `.dropna().mean()` on an all-null column) returns
+    NaN, not None, when every value is missing — e.g. a beat whose
+    relaxation segment never actually decays 90% of the way back to
+    baseline before the next beat starts. A NaN silently breaks JSON
+    serialization of the response (FastAPI/Starlette reject it), so this
+    treats "no valid values" as None instead of propagating NaN.
+    """
+    arr = np.asarray(values, dtype=float)
+    arr = arr[~np.isnan(arr)]
+    return float(arr.mean()) if arr.size else None
