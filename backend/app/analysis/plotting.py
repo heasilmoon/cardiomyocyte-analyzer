@@ -171,14 +171,60 @@ def _draw_orientation_map(ax, orientation_map: np.ndarray, coherence_map: np.nda
     ax.axis("off")
 
 
-def plot_group_comparison(comparison: dict, out_path: str, max_metrics: int = 12) -> None:
-    """One dot-plot-with-mean-bar panel per metric, across all groups.
+def _format_p(p: float | None) -> str:
+    """GraphPad Prism-style p-value text: exact to 4 decimals, '< 0.0001' below that."""
+    if p is None:
+        return "p = n/a"
+    if p < 0.0001:
+        return "p < 0.0001"
+    return f"p = {p:.4f}"
 
-    Panels are ordered most-significant-first (comparison["metrics"] is
-    already sorted that way) and capped at max_metrics so a summary with
-    many fields doesn't produce an unreadably large grid. Works for any
-    number of groups (2+) — the primary omnibus test is Mann-Whitney U for
-    exactly 2 groups or Kruskal-Wallis for 3+, per compare_groups().
+
+def _bracket_pairs(metric: dict, labels: list[str]) -> list[tuple[int, int, float]]:
+    """(i, j, p) comparisons to draw as significance brackets for one metric.
+
+    Mirrors the usual dose-response / treatment-series figure layout: every
+    group is compared against the first group (the control/reference — the
+    first group the user adds), not all-vs-all, which for 5 groups would be
+    10 brackets and unreadable. All-pairs p-values are still in the results
+    table and summary.json. p-values shown are Dunn's post-hoc with
+    Bonferroni correction for 3+ groups, or the Mann-Whitney U p for 2.
+    Sorted so the shortest bracket sits lowest and the longest on top.
+    """
+    if metric["test"] == "mann_whitney_u":
+        return [(0, 1, metric["p_value"])] if metric["p_value"] is not None else []
+
+    posthoc = metric.get("posthoc") or []
+    reference = labels[0]
+    pairs = []
+    for entry in posthoc:
+        if entry["group_a"] != reference or entry["group_b"] not in labels:
+            continue
+        pairs.append((0, labels.index(entry["group_b"]), entry["p_value_bonferroni"]))
+    pairs.sort(key=lambda t: t[1] - t[0])
+    return pairs
+
+
+# Control in dark gray, then colors close to the Prism defaults the user's
+# lab figures use (pink / teal / purple / lavender), then fallbacks.
+_GROUP_COLORS = [
+    "#595959", "#ec4b81", "#2a9d8f", "#5b3a9b", "#b39ddb",
+    "#e67e22", "#3498db", "#27ae60", "#c0392b", "#7f8c8d",
+]
+
+
+def plot_group_comparison(comparison: dict, out_path: str, max_metrics: int = 12) -> None:
+    """One GraphPad-Prism-style panel per metric, across all groups.
+
+    Each panel: bar = group mean, error bar = SEM, overlaid dots = each
+    video's value, and stacked significance brackets with p-values for
+    each group vs. the first (control/reference) group — the layout of a
+    typical dose-response figure. Panels are ordered most-significant-first
+    (comparison["metrics"] is already sorted that way) and capped at
+    max_metrics so a summary with many fields doesn't produce an
+    unreadably large grid. Works for any number of groups (2+) — the
+    omnibus test in each title is Mann-Whitney U for exactly 2 groups or
+    Kruskal-Wallis for 3+, per compare_groups().
     """
     metrics = comparison["metrics"][:max_metrics]
 
@@ -192,57 +238,88 @@ def plot_group_comparison(comparison: dict, out_path: str, max_metrics: int = 12
 
     ncols = min(3, len(metrics))
     nrows = int(np.ceil(len(metrics) / ncols))
-    fig, axes = plt.subplots(nrows, ncols, figsize=(4.2 * ncols, 3.2 * nrows), squeeze=False)
-
-    palette = plt.get_cmap("tab10")
+    fig, axes = plt.subplots(nrows, ncols, figsize=(4.4 * ncols, 3.9 * nrows), squeeze=False)
     rng = np.random.default_rng(0)
 
     for idx, m in enumerate(metrics):
         ax = axes[idx // ncols][idx % ncols]
         groups = m["groups"]
+        labels = [g["label"] for g in groups]
         n_groups = len(groups)
+        xs = np.arange(n_groups)
         means = [g["mean"] for g in groups]
-        stds = [g["std"] for g in groups]
+        # SEM, not SD: the convention in the cardiomyocyte/organoid papers
+        # this tool is meant to feed into (mean ± SEM), and what makes the
+        # error bars comparable to a Prism figure of the same data.
+        sems = [g["std"] / np.sqrt(g["n"]) if g["n"] > 1 else 0.0 for g in groups]
+        colors = [_GROUP_COLORS[i % len(_GROUP_COLORS)] for i in range(n_groups)]
 
+        ax.bar(xs, means, width=0.62, color=colors, alpha=0.9, edgecolor="black", linewidth=0.8, zorder=2)
+        ax.errorbar(xs, means, yerr=sems, fmt="none", ecolor="black", elinewidth=1.2, capsize=4, zorder=4)
+
+        all_values: list[float] = []
         for gi, g in enumerate(groups):
-            xs = rng.normal(gi, 0.05, len(g["values"]))
-            ax.scatter(xs, g["values"], color=palette(gi % 10), alpha=0.8, s=25, zorder=3)
-        ax.errorbar(
-            range(n_groups),
-            means,
-            yerr=stds,
-            fmt="_",
-            color="black",
-            markersize=20,
-            markeredgewidth=2,
-            capsize=4,
-            zorder=4,
+            jitter = rng.normal(0, 0.06, len(g["values"]))
+            ax.scatter(
+                xs[gi] + jitter, g["values"], color=colors[gi], edgecolor="black", linewidth=0.6, s=30, zorder=5
+            )
+            all_values.extend(g["values"])
+
+        data_max = max(max(all_values, default=0.0), max(mu + s for mu, s in zip(means, sems)))
+        data_min = min(min(all_values, default=0.0), 0.0)
+        span = (data_max - data_min) or 1.0
+
+        # Stacked brackets above the data, shortest lowest — same look as
+        # Prism's "compare to control" annotations.
+        height = data_max + 0.07 * span
+        step = 0.12 * span
+        tick = 0.025 * span
+        pairs = _bracket_pairs(m, labels)
+        for i, j, p in pairs:
+            ax.plot(
+                [xs[i], xs[i], xs[j], xs[j]],
+                [height - tick, height, height, height - tick],
+                color="black",
+                linewidth=1.0,
+                zorder=6,
+            )
+            ax.text((xs[i] + xs[j]) / 2, height + 0.012 * span, _format_p(p), ha="center", va="bottom", fontsize=7.5)
+            height += step
+        top = height + 0.03 * span if pairs else data_max + 0.12 * span
+        ax.set_ylim(data_min - 0.04 * span if data_min < 0 else 0.0, top)
+
+        ax.set_xticks(xs)
+        ax.set_xticklabels(
+            labels,
+            fontsize=8,
+            rotation=30 if n_groups > 3 else 0,
+            ha="right" if n_groups > 3 else "center",
         )
-        ax.set_xticks(range(n_groups))
-        ax.set_xticklabels([g["label"] for g in groups], fontsize=8, rotation=15 if n_groups > 3 else 0)
-        ax.set_xlim(-0.5, n_groups - 0.5)
+        ax.set_xlim(-0.6, n_groups - 0.4)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.set_ylabel("mean ± SEM", fontsize=8)
 
-        test_label = "MWU" if m["test"] == "mann_whitney_u" else "KW"
-        p = m["p_value"]
-        p_text = f"{test_label} p={p:.3g}" if p is not None else f"{test_label} p=n/a"
-        sig = " *" if (p is not None and p < 0.05) else ""
-
-        extra = ""
-        posthoc = m.get("posthoc")
-        if posthoc:
-            n_sig = sum(1 for ph in posthoc if ph["p_value_bonferroni"] < 0.05)
-            extra += f"\nDunn's: {n_sig}/{len(posthoc)} sig (Bonf.)"
+        test_label = "Mann-Whitney U" if m["test"] == "mann_whitney_u" else "Kruskal-Wallis"
+        title_extra = ""
         lmm_pairwise = m.get("lmm_pairwise")
         if lmm_pairwise:
             n_sig_lmm = sum(1 for pw in lmm_pairwise if pw["p_value"] < 0.05)
-            extra += f"\nLMM: {n_sig_lmm}/{len(lmm_pairwise)} sig ({m.get('lmm_n_clusters')} clusters)"
-
-        ax.set_title(f"{m['metric']}\n{p_text}{sig}{extra}", fontsize=9)
+            title_extra = f"\nLMM: {n_sig_lmm}/{len(lmm_pairwise)} pairs sig ({m.get('lmm_n_clusters')} clusters)"
+        ax.set_title(f"{m['metric']}\n{test_label} {_format_p(m['p_value'])}{title_extra}", fontsize=9)
 
     for idx in range(len(metrics), nrows * ncols):
         axes[idx // ncols][idx % ncols].axis("off")
 
-    fig.tight_layout()
+    n_groups_total = len(comparison["labels"])
+    bracket_note = (
+        "Brackets: Mann-Whitney U p-value"
+        if n_groups_total == 2
+        else f"Brackets: each group vs. '{comparison['labels'][0]}', Dunn's post-hoc p (Bonferroni-corrected)"
+    )
+    fig.text(0.5, 0.005, bracket_note, ha="center", va="bottom", fontsize=8, color="#444444")
+
+    fig.tight_layout(rect=(0, 0.03, 1, 1))
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
 
