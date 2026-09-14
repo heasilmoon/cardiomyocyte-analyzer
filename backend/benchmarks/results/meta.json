@@ -1,0 +1,7 @@
+{
+  "n_runs": 1080,
+  "size_px": 160,
+  "duration_s": 10.0,
+  "contraction_fraction": 0.04,
+  "default_params": "analyze_beating defaults (prominence_frac=0.15, auto min_bpm_gap)"
+}
