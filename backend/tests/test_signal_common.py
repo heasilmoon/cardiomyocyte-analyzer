@@ -1,6 +1,36 @@
 import numpy as np
 
-from app.analysis.signal_common import detect_peaks, find_local_min_between, smooth
+from app.analysis.signal_common import (
+    detect_peaks,
+    estimate_dominant_period_s,
+    find_local_min_between,
+    smooth,
+)
+
+
+def _pulse_train(beat_times, fps=30.0, duration_s=10.0):
+    """Narrow contraction-like pulses (fast rise, slower decay) at given times."""
+    t = np.arange(0, duration_s, 1 / fps)
+    y = np.zeros_like(t)
+    for tb in beat_times:
+        y += np.where(t < tb, np.exp(-((t - tb) / 0.06) ** 2), np.exp(-(t - tb) / 0.15))
+    return y
+
+
+def test_estimate_dominant_period_regular_beats():
+    y = _pulse_train(np.arange(1.0, 10.0, 2.0))  # 30 BPM, perfectly regular
+    assert abs(estimate_dominant_period_s(y, 30.0) - 2.0) < 0.15
+
+
+def test_estimate_dominant_period_does_not_double_on_alternating_intervals():
+    # Long/short alternating intervals (2.14 / 1.89 s) make the two-beat lag
+    # line up better than the one-beat lag in the autocorrelation. Without a
+    # subharmonic check this returned ~4.0 s and the beat detector then
+    # suppressed every other beat (found by benchmarks/beating_accuracy.py).
+    beats = np.array([1.61, 3.75, 5.64, 7.78, 9.72])
+    y = _pulse_train(beats)
+    period = estimate_dominant_period_s(y, 30.0)
+    assert 1.7 < period < 2.4, period
 
 
 def test_smooth_preserves_length():

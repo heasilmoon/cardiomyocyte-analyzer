@@ -83,6 +83,33 @@ def estimate_dominant_period_s(
 
     segment = autocorr[min_lag : max_lag + 1]
     best_lag = min_lag + int(np.argmax(segment))
+    best_val = autocorr[best_lag]
+
+    # Period-doubling guard. When beat intervals alternate long/short
+    # (e.g. 2.1 s / 1.9 s), the lag of ONE beat is smeared while the lag of
+    # TWO beats lines up almost perfectly, so the global autocorrelation
+    # maximum can land on 2x (or 3x) the true period. Downstream that sets
+    # the minimum peak spacing to ~0.6 x (2 x period), which then suppresses
+    # every other genuine beat — found by the synthetic benchmark as a
+    # reproducible 3-of-5 under-count at 30 BPM. Same fix pitch trackers
+    # use for octave errors: if there's a clearly strong autocorrelation
+    # peak near best_lag / 3 or / 2, prefer that shorter period. 0.6 is a
+    # deliberately conservative fraction — in the failing case the true
+    # period's peak was 0.81 of the doubled one; in regular beating the
+    # shorter lag is the global maximum anyway.
+    for divisor in (3, 2):
+        sub = best_lag / divisor
+        if sub < min_lag:
+            continue
+        lo = max(min_lag, int(np.floor(sub * 0.85)))
+        hi = min(max_lag, int(np.ceil(sub * 1.15)))
+        if hi <= lo:
+            continue
+        k = lo + int(np.argmax(autocorr[lo : hi + 1]))
+        if autocorr[k] > 0 and autocorr[k] >= 0.6 * best_val:
+            best_lag = k
+            break
+
     return best_lag / fps
 
 
