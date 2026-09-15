@@ -49,6 +49,13 @@ function fieldLabel(key) {
     mean_inter_peak_interval_s: "평균 피크 간격 (s)",
     mean_amplitude_df_f0: "평균 진폭 (ΔF/F0)",
     max_amplitude_df_f0: "최대 진폭 (ΔF/F0 max)",
+    background_method: "배경 형광 빼기 방식",
+    mean_start_to_peak_s: "평균 시작→피크 시간 (Ca²⁺ 방출, s)",
+    mean_peak_to_end_s: "평균 피크→끝 시간 (재흡수, s)",
+    mean_transient_duration_s: "평균 트랜지언트 지속시간 (s)",
+    mean_ctd50_s: "평균 CTD50 (50% 높이 폭, s)",
+    mean_ctd90_s: "평균 CTD90 (90% 감쇠 폭, s)",
+    mean_rise_time_10_90_s: "평균 rise time 10–90% (s)",
     mean_decay_tau_s: "평균 감쇠 시간상수 τ (s)",
     n_objects: "객체 수",
     mean_area_px: "평균 면적 (px²)",
@@ -157,6 +164,19 @@ function initRoiSelector(panelId) {
   const roiH = panel.querySelector('input[name="roi_h"]');
   if (!fileInput || !canvas || !roiX || !roiY || !roiW || !roiH) return;
 
+  // Optional second rectangle: a cell-free background region for the
+  // calcium panel's background-fluorescence subtraction (blue), only
+  // offered when that panel's background_mode select is set to "manual".
+  const bgModeSelect = panel.querySelector('select[name="background_mode"]');
+  const bgBtn = panel.querySelector(".roi-mode-bg");
+  const bgX = panel.querySelector('input[name="bg_x"]');
+  const bgY = panel.querySelector('input[name="bg_y"]');
+  const bgW = panel.querySelector('input[name="bg_w"]');
+  const bgH = panel.querySelector('input[name="bg_h"]');
+  const hasBg = Boolean(bgModeSelect && bgBtn && bgX && bgY && bgW && bgH);
+  let bgRect = null;
+  let drawTarget = "roi";
+
   const ctx = canvas.getContext("2d");
   // Preview goes through the backend (POST /api/preview_frame) rather than
   // a browser <video> element: OpenCV can decode codecs (e.g. MPEG-4 Part 2
@@ -186,6 +206,40 @@ function initRoiSelector(panelId) {
       ctx.fillStyle = "rgba(224, 85, 79, 0.18)";
       ctx.fillRect(rect.x * scaleX, rect.y * scaleY, rect.w * scaleX, rect.h * scaleY);
     }
+    if (bgRect) {
+      const scaleX = canvas.width / naturalWidth;
+      const scaleY = canvas.height / naturalHeight;
+      ctx.strokeStyle = "#2f6fd6";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 4]);
+      ctx.strokeRect(bgRect.x * scaleX, bgRect.y * scaleY, bgRect.w * scaleX, bgRect.h * scaleY);
+      ctx.setLineDash([]);
+      ctx.fillStyle = "rgba(47, 111, 214, 0.15)";
+      ctx.fillRect(bgRect.x * scaleX, bgRect.y * scaleY, bgRect.w * scaleX, bgRect.h * scaleY);
+    }
+  }
+
+  function updateStatus() {
+    const roiText = roiX.value ? `ROI: (${roiX.value}, ${roiY.value}), ${roiW.value}×${roiH.value}px` : "전체 화면 사용 중";
+    const bgText = hasBg && bgX.value ? ` · 배경: (${bgX.value}, ${bgY.value}), ${bgW.value}×${bgH.value}px` : "";
+    const modeText = hasBg && drawTarget === "bg" ? " · [지금 그리면 배경 영역]" : "";
+    statusEl.textContent = roiText + bgText + modeText;
+  }
+
+  function clearBg() {
+    bgRect = null;
+    if (hasBg) {
+      bgX.value = "";
+      bgY.value = "";
+      bgW.value = "";
+      bgH.value = "";
+    }
+  }
+
+  function setDrawTarget(target) {
+    drawTarget = target;
+    if (hasBg) bgBtn.textContent = target === "bg" ? "분석 ROI 그리기로 전환" : "배경 영역 그리기";
+    updateStatus();
   }
 
   function clearRoi() {
@@ -194,8 +248,24 @@ function initRoiSelector(panelId) {
     roiY.value = "";
     roiW.value = "";
     roiH.value = "";
-    statusEl.textContent = "전체 화면 사용 중";
+    clearBg();
+    setDrawTarget("roi");
     redraw();
+  }
+
+  if (hasBg) {
+    const syncBgMode = () => {
+      const manual = bgModeSelect.value === "manual";
+      bgBtn.style.display = manual ? "" : "none";
+      if (!manual) {
+        clearBg();
+        setDrawTarget("roi");
+        redraw();
+      }
+    };
+    bgModeSelect.addEventListener("change", syncBgMode);
+    bgBtn.addEventListener("click", () => setDrawTarget(drawTarget === "bg" ? "roi" : "bg"));
+    syncBgMode();
   }
 
   fileInput.addEventListener("change", async () => {
@@ -259,28 +329,35 @@ function initRoiSelector(panelId) {
   canvas.addEventListener("mousemove", (evt) => {
     if (!drawing) return;
     const pos = eventToNativeCoords(evt);
-    rect = {
+    const r = {
       x: Math.max(0, Math.min(startX, pos.x)),
       y: Math.max(0, Math.min(startY, pos.y)),
       w: Math.abs(pos.x - startX),
       h: Math.abs(pos.y - startY),
     };
+    if (drawTarget === "bg") bgRect = r;
+    else rect = r;
     redraw();
   });
 
   window.addEventListener("mouseup", () => {
     if (!drawing) return;
     drawing = false;
-    if (rect && rect.w >= 4 && rect.h >= 4) {
-      roiX.value = Math.round(rect.x);
-      roiY.value = Math.round(rect.y);
-      roiW.value = Math.round(rect.w);
-      roiH.value = Math.round(rect.h);
-      statusEl.textContent = `ROI: (${roiX.value}, ${roiY.value}), ${roiW.value}×${roiH.value}px`;
+    const current = drawTarget === "bg" ? bgRect : rect;
+    if (current && current.w >= 4 && current.h >= 4) {
+      const [ix, iy, iw, ih] = drawTarget === "bg" ? [bgX, bgY, bgW, bgH] : [roiX, roiY, roiW, roiH];
+      ix.value = Math.round(current.x);
+      iy.value = Math.round(current.y);
+      iw.value = Math.round(current.w);
+      ih.value = Math.round(current.h);
+    } else if (drawTarget === "bg") {
+      bgRect = null;
+      redraw();
     } else {
       rect = null;
       redraw();
     }
+    updateStatus();
   });
 
   resetBtn.addEventListener("click", clearRoi);
@@ -302,22 +379,46 @@ if (compareAnalysisType) {
 function renderComparisonResults(container, data) {
   const { comparison, urls } = data;
   const hasLmm = comparison.metrics.some((m) => m.lmm_pairwise !== undefined);
-  const testLabel = (t) => (t === "mann_whitney_u" ? "Mann-Whitney U" : "Kruskal-Wallis");
+  const testLabels = {
+    mann_whitney_u: "Mann-Whitney U",
+    kruskal_wallis: "Kruskal-Wallis",
+    welch_t: "Welch's t-test",
+    anova: "One-way ANOVA",
+  };
+  const testLabel = (t) => testLabels[t] || t;
+  const errorBar = comparison.error_bar === "sd" ? "sd" : "sem";
+  const errorBarLabel = errorBar === "sd" ? "표준편차(SD)" : "SEM";
 
   const rows = comparison.metrics
     .map((m) => {
       const sig = m.p_value !== null && m.p_value < 0.05 ? " *" : "";
-      const pText = m.p_value !== null ? m.p_value.toFixed(4) + sig : "&mdash;";
+      let pText = m.p_value !== null ? m.p_value.toFixed(4) + sig : "&mdash;";
+      if (m.test === "anova" && m.welch_anova_p_value !== null && m.welch_anova_p_value !== undefined) {
+        pText += `<br/><span style="color:var(--muted)">Welch ANOVA p=${m.welch_anova_p_value.toFixed(4)}</span>`;
+      }
       const groupsText = m.groups
-        .map((g) => `${g.label}: ${formatValue(g.mean)} &plusmn; ${formatValue(g.std)} (n=${g.n})`)
+        .map((g) => {
+          const err = errorBar === "sd" ? g.std : g.sem;
+          const shapiro =
+            g.shapiro_p !== null && g.shapiro_p !== undefined
+              ? ` <span style="color:var(--muted)">(정규성 p=${g.shapiro_p.toFixed(3)})</span>`
+              : "";
+          return `${g.label}: ${formatValue(g.mean)} &plusmn; ${formatValue(err)} (n=${g.n})${shapiro}`;
+        })
         .join("<br/>");
 
       let posthocText = "&mdash;";
       if (m.posthoc) {
         posthocText = m.posthoc
           .map((p) => {
-            const s = p.p_value_bonferroni < 0.05 ? " *" : "";
-            return `${p.group_a} vs ${p.group_b}: p=${p.p_value_bonferroni.toFixed(4)}${s}`;
+            const pv = p.p_adjusted;
+            const s = pv !== null && pv !== undefined && pv < 0.05 ? " *" : "";
+            const pvText = pv !== null && pv !== undefined ? pv.toFixed(4) : "n/a";
+            const alt =
+              p.p_value_welch_holm !== undefined
+                ? ` <span style="color:var(--muted)">(Welch+Holm ${p.p_value_welch_holm.toFixed(4)})</span>`
+                : "";
+            return `${p.group_a} vs ${p.group_b}: p=${pvText}${s}${alt}`;
           })
           .join("<br/>");
       }
@@ -350,13 +451,13 @@ function renderComparisonResults(container, data) {
 
   container.innerHTML = `
     ${urls.plot ? `<img src="${API_BASE}${urls.plot}" alt="comparison plot" />` : ""}
-    <p class="roi-applied-note">그룹: ${groupHeaders}</p>
+    <p class="roi-applied-note">그룹: ${groupHeaders} &middot; 검정: ${comparison.test_family === "parametric" ? "모수 (Welch t / ANOVA + Tukey)" : "비모수 (Mann-Whitney / Kruskal-Wallis + Dunn)"} &middot; 오차막대: ${errorBarLabel}</p>
     <table class="summary compare-table">
       <thead><tr>
         <th>지표</th>
-        <th>그룹별 평균 &plusmn; 표준편차 (n)</th>
+        <th>그룹별 평균 &plusmn; ${errorBarLabel} (n)</th>
         <th>${omnibusTestName} p-value</th>
-        ${comparison.labels.length > 2 ? "<th>Dunn's post-hoc (Bonferroni)</th>" : ""}
+        ${comparison.labels.length > 2 ? `<th>${comparison.posthoc_label || "post-hoc"}</th>` : ""}
         ${hasLmm ? "<th>LMM 쌍별 p-value (샘플 보정)</th>" : ""}
       </tr></thead>
       <tbody>${rows}</tbody>

@@ -83,7 +83,17 @@ def _draw_piv_field(ax, field: dict) -> None:
 
 
 def plot_calcium(result: CalciumResult, out_path: str) -> None:
-    fig, ax = plt.subplots(figsize=(9, 4))
+    """dF/F0 trace with detected transients, plus (when available) the
+    pixel-wise peak dF/F0 map showing where in the field the signal is."""
+    has_map = getattr(result, "df_f0_map", None) is not None
+    if has_map:
+        fig, (ax, ax_map) = plt.subplots(
+            1, 2, figsize=(13, 4), gridspec_kw={"width_ratios": [2.2, 1]}
+        )
+    else:
+        fig, ax = plt.subplots(figsize=(9, 4))
+        ax_map = None
+
     ax.plot(result.time_s, result.df_f0, color="#16a085", linewidth=1.3, label="dF/F0")
     if len(result.peak_indices):
         ax.plot(
@@ -96,8 +106,18 @@ def plot_calcium(result: CalciumResult, out_path: str) -> None:
         )
     ax.set_xlabel("Time (s)")
     ax.set_ylabel("ΔF / F0")
-    ax.set_title(f"Calcium transients — {result.summary.get('n_transients', 0)} detected")
+    bg = result.summary.get("background_method", "none")
+    bg_note = "" if bg == "none" else f" (background subtracted: {bg})"
+    ax.set_title(f"Calcium transients — {result.summary.get('n_transients', 0)} detected{bg_note}")
     ax.legend(loc="upper right", fontsize=8)
+
+    if ax_map is not None:
+        im = ax_map.imshow(result.df_f0_map, cmap="inferno", vmin=0)
+        ax_map.set_title("Pixel-wise peak ΔF/F0", fontsize=9)
+        ax_map.set_xticks([])
+        ax_map.set_yticks([])
+        fig.colorbar(im, ax=ax_map, fraction=0.046, pad=0.04, label="peak ΔF/F0")
+
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
@@ -187,11 +207,12 @@ def _bracket_pairs(metric: dict, labels: list[str]) -> list[tuple[int, int, floa
     group is compared against the first group (the control/reference — the
     first group the user adds), not all-vs-all, which for 5 groups would be
     10 brackets and unreadable. All-pairs p-values are still in the results
-    table and summary.json. p-values shown are Dunn's post-hoc with
-    Bonferroni correction for 3+ groups, or the Mann-Whitney U p for 2.
+    table and summary.json. p-values shown are each post-hoc entry's
+    `p_adjusted` (Dunn's/Bonferroni or Tukey HSD, per test family) for 3+
+    groups, or the two-group test's p (Mann-Whitney U or Welch's t) for 2.
     Sorted so the shortest bracket sits lowest and the longest on top.
     """
-    if metric["test"] == "mann_whitney_u":
+    if metric["test"] in ("mann_whitney_u", "welch_t"):
         return [(0, 1, metric["p_value"])] if metric["p_value"] is not None else []
 
     posthoc = metric.get("posthoc") or []
@@ -200,9 +221,20 @@ def _bracket_pairs(metric: dict, labels: list[str]) -> list[tuple[int, int, floa
     for entry in posthoc:
         if entry["group_a"] != reference or entry["group_b"] not in labels:
             continue
-        pairs.append((0, labels.index(entry["group_b"]), entry["p_value_bonferroni"]))
+        p_adj = entry.get("p_adjusted")
+        if p_adj is None:
+            continue
+        pairs.append((0, labels.index(entry["group_b"]), p_adj))
     pairs.sort(key=lambda t: t[1] - t[0])
     return pairs
+
+
+_TEST_LABELS = {
+    "mann_whitney_u": "Mann-Whitney U",
+    "kruskal_wallis": "Kruskal-Wallis",
+    "welch_t": "Welch's t-test",
+    "anova": "One-way ANOVA",
+}
 
 
 # Control in dark gray, then colors close to the Prism defaults the user's
@@ -227,6 +259,9 @@ def plot_group_comparison(comparison: dict, out_path: str, max_metrics: int = 12
     Kruskal-Wallis for 3+, per compare_groups().
     """
     metrics = comparison["metrics"][:max_metrics]
+    error_bar = comparison.get("error_bar", "sem")
+    if error_bar not in ("sem", "sd"):
+        error_bar = "sem"
 
     if not metrics:
         fig, ax = plt.subplots(figsize=(4, 2))
@@ -248,14 +283,19 @@ def plot_group_comparison(comparison: dict, out_path: str, max_metrics: int = 12
         n_groups = len(groups)
         xs = np.arange(n_groups)
         means = [g["mean"] for g in groups]
-        # SEM, not SD: the convention in the cardiomyocyte/organoid papers
-        # this tool is meant to feed into (mean ± SEM), and what makes the
-        # error bars comparable to a Prism figure of the same data.
-        sems = [g["std"] / np.sqrt(g["n"]) if g["n"] > 1 else 0.0 for g in groups]
+        # Error bar = SEM or SD per comparison["error_bar"]: SEM is the usual
+        # choice in cardiomyocyte/organoid figures, SD what the lab's own
+        # manuscripts report ("mean ± SD") — both are valid, they must just
+        # be labeled, so the y-axis says which one this is.
+        if error_bar == "sd":
+            errs = [g["std"] for g in groups]
+        else:
+            errs = [g.get("sem", g["std"] / np.sqrt(g["n"]) if g["n"] > 1 else 0.0) for g in groups]
+        sems = errs
         colors = [_GROUP_COLORS[i % len(_GROUP_COLORS)] for i in range(n_groups)]
 
         ax.bar(xs, means, width=0.62, color=colors, alpha=0.9, edgecolor="black", linewidth=0.8, zorder=2)
-        ax.errorbar(xs, means, yerr=sems, fmt="none", ecolor="black", elinewidth=1.2, capsize=4, zorder=4)
+        ax.errorbar(xs, means, yerr=errs, fmt="none", ecolor="black", elinewidth=1.2, capsize=4, zorder=4)
 
         all_values: list[float] = []
         for gi, g in enumerate(groups):
@@ -298,9 +338,9 @@ def plot_group_comparison(comparison: dict, out_path: str, max_metrics: int = 12
         ax.set_xlim(-0.6, n_groups - 0.4)
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
-        ax.set_ylabel("mean ± SEM", fontsize=8)
+        ax.set_ylabel(f"mean ± {error_bar.upper()}", fontsize=8)
 
-        test_label = "Mann-Whitney U" if m["test"] == "mann_whitney_u" else "Kruskal-Wallis"
+        test_label = _TEST_LABELS.get(m["test"], m["test"])
         title_extra = ""
         lmm_pairwise = m.get("lmm_pairwise")
         if lmm_pairwise:
@@ -312,10 +352,11 @@ def plot_group_comparison(comparison: dict, out_path: str, max_metrics: int = 12
         axes[idx // ncols][idx % ncols].axis("off")
 
     n_groups_total = len(comparison["labels"])
+    posthoc_label = comparison.get("posthoc_label", "post-hoc")
     bracket_note = (
-        "Brackets: Mann-Whitney U p-value"
+        f"Brackets: {posthoc_label} p-value"
         if n_groups_total == 2
-        else f"Brackets: each group vs. '{comparison['labels'][0]}', Dunn's post-hoc p (Bonferroni-corrected)"
+        else f"Brackets: each group vs. '{comparison['labels'][0]}', {posthoc_label} p"
     )
     fig.text(0.5, 0.005, bracket_note, ha="center", va="bottom", fontsize=8, color="#444444")
 

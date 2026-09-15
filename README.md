@@ -45,10 +45,15 @@ Python(FastAPI + OpenCV + scikit-image) 기반으로, Fiji 전체 배포판(수�
   것과 같은 OpenCV 디코더로 첫 프레임을 추출해서 보여줍니다 — 이 프로젝트의 합성 테스트 영상처럼
   일부 코덱(MPEG-4 Part 2 등)은 브라우저 `<video>`가 재생하지 못하는 경우가 있어서, 미리보기가
   실제 분석 가능 여부와 어긋나지 않도록 한 선택입니다.
-- **칼슘 이미징 분석 (Calcium imaging)**: 형광 강도 트레이스를 ΔF/F0로 정규화하고 각 트랜지언트의
-  피크 시각, 진폭(평균 및 최대 ΔF/F0), rise time(10–90%), 지수 감쇠 시간상수(τ), 그리고 박동
-  분석과 같은 정의의 감쇠 시간(time-to-decay T10/T50/T90)을 계산합니다. 빈도는 분당 횟수와 Hz
-  두 단위로 제공됩니다.
+- **칼슘 이미징 분석 (Calcium imaging)**: 형광 강도 트레이스를 (선택적으로 배경 형광을 뺀 뒤)
+  ΔF/F0로 정규화하고 각 트랜지언트의 피크 시각, 진폭(평균 및 최대 ΔF/F0), **시작→피크(Ca²⁺
+  방출), 피크→끝(재흡수), 트랜지언트 지속시간, CTD50/CTD90**(50% 높이 폭 / 90% 감쇠 폭 —
+  BeatProfiler의 Contract50/90에 해당), rise time(10–90%), 지수 감쇠 시간상수(τ), 감쇠 시간
+  (time-to-decay T10/T50/T90)을 계산합니다. 빈도는 분당 횟수와 Hz 두 단위로 제공됩니다. 배경
+  형광 빼기는 세포 없는 영역을 직접 사각형으로 지정하거나(파란색), 가장 어두운 5% 픽셀을
+  자동으로 배경으로 삼을 수 있습니다 — 세포가 화면을 꽉 채운 영상에서는 자동 방식이 어두운
+  세포를 배경으로 오인할 수 있어 기본은 "안 함"입니다. 결과 그림에는 **픽셀 단위 최대 ΔF/F0
+  지도**가 함께 나와 신호가 시야의 어디에서 나오는지 볼 수 있습니다.
 - **형태 분석 (Morphology, 2D/3D)**: 2D는 대표 이미지(최대 강도 투영)를, 3D는 영상의 각 프레임을
   z-slice로 간주한 부피를 분할해 세포 개수·면적(2D)/부피(3D)·둘레·이심률을 계산합니다. 맞닿은
   세포는 distance-transform 기반 watershed로 자동 분리됩니다(끌 수도 있음). 세포/구조의 방향
@@ -60,11 +65,16 @@ Python(FastAPI + OpenCV + scikit-image) 기반으로, Fiji 전체 배포판(수�
 - **그룹 통계 비교**: 같은 분석을 여러 영상(2개 이상의 그룹, 예: 대조군 vs 처리군, 또는 대조군/
   저용량/고용량)에 대해 돌린 뒤 각 지표를 비교합니다. **그룹이 2개면 Mann-Whitney U**, **3개
   이상이면 Kruskal-Wallis 전체검정 + Dunn's post-hoc**(그룹 쌍별 비교, 순위 기반이라 Kruskal-Wallis와
-  같은 가정을 공유하며, 다중비교는 Bonferroni로 보정)를 씁니다. 결과 그림은 GraphPad Prism 논문
-  그림 스타일입니다 — 지표마다 그룹별 막대(평균) + 개별 영상 점 + SEM 오차막대, 그 위에 **첫 번째
-  그룹(대조군/기준) 대비 각 그룹의 p-value 브래킷**을 층층이 표시합니다(3개 이상이면 Dunn's
-  Bonferroni 보정 p, 2개면 Mann-Whitney U p; 모든 쌍의 p-value는 표와 `summary.json`에 있음).
-  오차막대는 표준편차가 아니라 **SEM**입니다(심근세포/오가노이드 논문의 일반적 관례). 한
+  같은 가정을 공유하며, 다중비교는 Bonferroni로 보정)를 씁니다. **모수 검정 옵션**(`test_family=
+  parametric`)을 고르면 GraphPad Prism 방식 그대로 2그룹은 Welch's t-test(Student's t p도 함께),
+  3그룹 이상은 one-way ANOVA + Tukey HSD post-hoc, 그리고 분산이 다를 때를 위해 Welch's ANOVA와
+  쌍별 Welch t-test(Holm 보정; Prism의 Dunnett T3/Games-Howell 역할의 보수적 대용)를 나란히
+  보고합니다. 그룹마다 Shapiro-Wilk 정규성 p-value도 나오므로 어느 검정을 쓸지 근거를 댈 수
+  있습니다 — 그룹당 n이 8개 미만이면 정규성 검정 자체의 검정력이 낮아서 비모수가 기본값입니다.
+  결과 그림은 GraphPad Prism 논문 그림 스타일입니다 — 지표마다 그룹별 막대(평균) + 개별 영상 점 +
+  오차막대(**SEM 또는 SD 선택**, y축에 표시), 그 위에 **첫 번째 그룹(대조군/기준) 대비 각 그룹의
+  p-value 브래킷**을 층층이 표시합니다(3개 이상이면 Dunn's Bonferroni 보정 p 또는 Tukey HSD p,
+  2개면 Mann-Whitney U 또는 Welch t p; 모든 쌍의 p-value는 표와 `summary.json`에 있음). 한
   샘플(배치/웰)에서 여러 영상을 찍은 경우, 그룹별로 파일 순서대로
   배치/샘플 라벨을 넣으면 **선형 혼합효과 모델(LMM, `value ~ group + (1|sample)`)**로 샘플 ID를
   랜덤효과로 넣어 계산한 p-value를 그룹 쌍마다(그룹이 몇 개든 모든 쌍) 함께 제공합니다 — 같은
@@ -174,9 +184,9 @@ Render 대시보드 → 서비스 → **Environment** 탭에서 아래 두 개�
 | Endpoint | 설명 |
 |---|---|
 | `POST /api/analyze/beating` | `file`(mp4), `fps_override`, `min_bpm_gap`(선택, 비우면 자동 추정), `prominence_frac`, `signal_mode`(`reference`/`consecutive`/`piv`), `reference_index`, `piv_window_size`(기본 32px), `piv_step`(기본 window_size/2), `roi_x`/`roi_y`/`roi_w`/`roi_h`(선택, 관심영역 픽셀 좌표) |
-| `POST /api/analyze/calcium` | `file`(mp4), `fps_override`, `min_transients_per_min`, `prominence_frac`, `roi_x`/`roi_y`/`roi_w`/`roi_h`(선택) |
+| `POST /api/analyze/calcium` | `file`(mp4), `fps_override`, `min_transients_per_min`, `prominence_frac`, `roi_x`/`roi_y`/`roi_w`/`roi_h`(선택), `background_mode`(`none`/`auto`/`manual`), `bg_x`/`bg_y`/`bg_w`/`bg_h`(`manual`일 때, 원본 프레임 좌표) |
 | `POST /api/analyze/morphology` | `file`(mp4), `mode`(`2d`/`3d`), `min_object_size`, `separate_touching`, `separation_min_distance`, `compute_texture_alignment` |
-| `POST /api/analyze/compare` | `analysis_type`(`beating`/`calcium`/`morphology`), `morphology_mode`, 그룹마다 인덱스가 붙은 필드 `group_{i}_label`, `group_{i}_files`(다중), `group_{i}_batches`(선택, 줄바꿈/쉼표로 구분된 배치 라벨) — `i`는 0부터, 그룹 2개 이상(연속 번호일 필요는 없음) |
+| `POST /api/analyze/compare` | `analysis_type`(`beating`/`calcium`/`morphology`), `morphology_mode`, `test_family`(`nonparametric` 기본/`parametric`), `error_bar`(`sem` 기본/`sd`), 그룹마다 인덱스가 붙은 필드 `group_{i}_label`, `group_{i}_files`(다중), `group_{i}_batches`(선택, 줄바꿈/쉼표로 구분된 배치 라벨) — `i`는 0부터, 그룹 2개 이상(연속 번호일 필요는 없음) |
 | `POST /api/analyze/batch` | `analysis_type`, `morphology_mode`, `files`(다중) — 영상별 결과를 CSV 하나로 |
 | `POST /api/analyze/colocalization` | `channel_a_file`, `channel_b_file`, `label_a`, `label_b` |
 | `POST /api/validate/agreement` | `file`(CSV), `column_a`, `column_b`, `label_a`, `label_b` |
