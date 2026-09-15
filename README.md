@@ -212,6 +212,16 @@ pytest tests/ -v
 뽑은 수축 신호이고, `test_fiji_regression.py`가 이 신호로 박동 검출이 실제 육안 확인치(~5-6박동,
 ~30 BPM)와 맞는지 회귀 테스트로 고정해둡니다.
 
+### 영상 줄여서 공유하기
+
+실제 현미경 영상은 수백 MB라 공유하기 어렵습니다. `backend/tools/shrink_video.py`는 OpenCV만으로
+(ffmpeg 불필요) 영상의 일부 구간을 저해상도로 잘라 몇 MB짜리 클립을 만듭니다 — 시야 모양을
+보여주거나 문제를 재현할 때 쓰세요(재인코딩되므로 실제 분석은 원본으로).
+```bash
+cd backend && source .venv/bin/activate
+python tools/shrink_video.py 원본.mp4 작은클립.mp4 --seconds 5 --width 320
+```
+
 ### 합성 영상 벤치마크 (박동 검출 정확도)
 
 `backend/benchmarks/beating_accuracy.py`는 **정답을 아는 합성 영상**(속도가 빠른 수축·느린 이완
