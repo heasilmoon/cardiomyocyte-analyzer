@@ -67,3 +67,53 @@ def test_analyze_calcium_reports_decay_times_max_amplitude_and_hz():
     assert s["mean_time_to_decay_50_s"] is not None
 
     json.dumps(s, allow_nan=False)  # no NaN leaking into the API response
+
+
+def test_analyze_calcium_phase_durations_and_widths_are_consistent():
+    fps = 30.0
+    frames = _make_transient_frames(n_frames=180, fps=fps, hz=1.0)
+    result = analyze_calcium(frames, fps)
+    df = result.transients_df
+    assert set(df.columns) >= {
+        "onset_time_s", "end_time_s", "start_to_peak_s", "peak_to_end_s", "duration_s", "ctd50_s", "ctd90_s"
+    }
+    for _, tr in df.iterrows():
+        assert tr["onset_time_s"] <= tr["peak_time_s"] <= tr["end_time_s"]
+        if tr["peak_to_end_s"] is not None and tr["duration_s"] is not None:
+            assert abs(tr["start_to_peak_s"] + tr["peak_to_end_s"] - tr["duration_s"]) < 1e-9
+        # Width at half-amplitude is narrower than width at 90 % decay, and
+        # both fit inside the whole transient.
+        if tr["ctd50_s"] is not None and tr["ctd90_s"] is not None:
+            assert tr["ctd50_s"] <= tr["ctd90_s"] <= tr["duration_s"] + 1e-9
+    assert result.summary["mean_ctd50_s"] is not None
+    assert result.summary["mean_start_to_peak_s"] > 0
+
+
+def test_analyze_calcium_background_subtraction_and_map():
+    fps = 30.0
+    frames = _make_transient_frames(n_frames=120, fps=fps, hz=1.0)
+    # Add a constant dark border (cell-free background) around the signal.
+    padded = np.zeros((frames.shape[0], 40, 40), dtype=np.uint8) + 20
+    padded[:, 10:30, 10:30] = frames
+    bg_trace = np.full(frames.shape[0], 20.0)
+
+    manual = analyze_calcium(padded, fps, background_trace=bg_trace)
+    assert manual.summary["background_method"] == "manual_roi"
+    assert manual.background_trace is not None
+    auto = analyze_calcium(padded, fps, auto_background=True)
+    assert auto.summary["background_method"] == "auto_darkest_pixels"
+    # The darkest 5 % of pixels are the constant-20 border -> ~20 everywhere.
+    assert np.allclose(auto.background_trace, 20.0, atol=1.0)
+    none = analyze_calcium(padded, fps)
+    assert none.summary["background_method"] == "none"
+    assert none.background_trace is None
+
+    # Pixel map has frame shape and is largest inside the signal region.
+    assert auto.df_f0_map.shape == (40, 40)
+    assert auto.df_f0_map[15:25, 15:25].mean() > auto.df_f0_map[:5, :5].mean()
+
+    try:
+        analyze_calcium(padded, fps, background_trace=np.zeros(5))
+        assert False, "expected ValueError for wrong-length background trace"
+    except ValueError:
+        pass

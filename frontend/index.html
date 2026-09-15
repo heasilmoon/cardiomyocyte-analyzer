@@ -112,19 +112,35 @@
           </div>
         </div>
         <div class="form-row">
+          <div class="field">
+            <label>배경 형광 빼기</label>
+            <select name="background_mode" class="background-mode">
+              <option value="none">안 함 (기본)</option>
+              <option value="auto">자동 (가장 어두운 5% 픽셀을 배경으로)</option>
+              <option value="manual">직접 지정 (아래에서 세포 없는 영역을 파란 사각형으로 그리기)</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
           <div class="field roi-field">
             <label>관심영역(ROI) 선택 (선택사항)</label>
             <p class="roi-hint">영상을 선택하면 첫 프레임이 아래 나타납니다. 마우스로 드래그해서 분석할
-            영역만 지정할 수 있어요. 지정하지 않으면 전체 화면을 씁니다.</p>
+            영역만 지정할 수 있어요. 지정하지 않으면 전체 화면을 씁니다. 배경 형광 빼기를 "직접 지정"으로
+            두면 "배경 영역 그리기"를 누른 뒤 세포가 없는 영역을 드래그하세요(파란색).</p>
             <canvas class="roi-canvas"></canvas>
             <div class="roi-controls">
               <span class="roi-status">전체 화면 사용 중</span>
               <button type="button" class="roi-reset">ROI 초기화</button>
+              <button type="button" class="roi-reset roi-mode-bg" style="display:none;">배경 영역 그리기</button>
             </div>
             <input type="hidden" name="roi_x" />
             <input type="hidden" name="roi_y" />
             <input type="hidden" name="roi_w" />
             <input type="hidden" name="roi_h" />
+            <input type="hidden" name="bg_x" />
+            <input type="hidden" name="bg_y" />
+            <input type="hidden" name="bg_w" />
+            <input type="hidden" name="bg_h" />
           </div>
         </div>
         <div class="form-row">
@@ -208,6 +224,20 @@
             <select name="morphology_mode">
               <option value="2d">2D</option>
               <option value="3d">3D</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>통계 검정</label>
+            <select name="test_family">
+              <option value="nonparametric">비모수 (Mann-Whitney / Kruskal-Wallis + Dunn) — 기본</option>
+              <option value="parametric">모수 (Welch t-test / one-way ANOVA + Tukey)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>오차막대</label>
+            <select name="error_bar">
+              <option value="sem">SEM (평균의 표준오차)</option>
+              <option value="sd">SD (표준편차)</option>
             </select>
           </div>
         </div>

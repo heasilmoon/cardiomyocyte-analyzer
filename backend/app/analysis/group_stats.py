@@ -5,13 +5,22 @@ experimental design: run the same single-video analysis (beating / calcium /
 morphology) over every video in each group, then compare each numeric
 summary metric across groups.
 
-Two groups get a Mann-Whitney U test (rather than a t-test) since group
-sizes in this kind of experiment are usually small (a handful of wells/
-videos per condition) and there's no reason to assume normality. Three or
-more groups get the non-parametric equivalent, Kruskal-Wallis, as the
-omnibus test, followed by Dunn's post-hoc test for each pairwise comparison
-(rank-based, matching Kruskal-Wallis's own assumptions) with Bonferroni
-correction for the multiple pairwise comparisons.
+Two test families are available (test_family argument):
+
+- "nonparametric" (default): two groups get a Mann-Whitney U test (rather
+  than a t-test) since group sizes in this kind of experiment are usually
+  small (a handful of wells/videos per condition) and there's no reason to
+  assume normality. Three or more groups get the non-parametric
+  equivalent, Kruskal-Wallis, as the omnibus test, followed by Dunn's
+  post-hoc test for each pairwise comparison (rank-based, matching
+  Kruskal-Wallis's own assumptions) with Bonferroni correction.
+- "parametric": the GraphPad-Prism-style workflow used in the lab's own
+  manuscripts (Welch's t-test for two groups; one-way ANOVA with Tukey HSD
+  post-hoc for 3+, plus Welch's ANOVA and pairwise Welch t-tests with Holm
+  correction for the unequal-variance case, reported alongside). Each
+  group's Shapiro-Wilk normality p-value is reported so the choice can be
+  justified; with n < ~8 per group that test has little power, which is
+  why non-parametric stays the default.
 
 When multiple recordings/images come from the same underlying biological
 sample (e.g. several fields of view from one differentiation batch/well),
@@ -32,10 +41,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from typing import Literal
+
 import numpy as np
 import pandas as pd
 from scipy import stats
 from statsmodels.regression.mixed_linear_model import MixedLM
+from statsmodels.stats.oneway import anova_oneway
+
+TestFamily = Literal["nonparametric", "parametric"]
 
 # Per-video technical/bookkeeping fields, not biological measurements —
 # comparing them across groups isn't meaningful, so they're left out of the
@@ -125,16 +139,89 @@ def _dunns_posthoc(labels: list[str], per_group_vals: list[list[float]]) -> list
             se = np.sqrt(variance_term)
             z = (mean_ranks[i] - mean_ranks[j]) / se
             p_raw = float(2.0 * (1.0 - stats.norm.cdf(abs(z))))
+            p_bonf = min(p_raw * n_pairs, 1.0)
             results.append(
                 {
                     "group_a": labels[i],
                     "group_b": labels[j],
                     "z": float(z),
                     "p_value": p_raw,
-                    "p_value_bonferroni": min(p_raw * n_pairs, 1.0),
+                    "p_value_bonferroni": p_bonf,
+                    # Generic "the corrected p to display" key, shared with
+                    # the parametric post-hoc so plots/UI don't branch.
+                    "p_adjusted": p_bonf,
                 }
             )
     return results
+
+
+def _holm_adjust(p_values: list[float]) -> list[float]:
+    """Holm step-down adjusted p-values (family-wise error control, less
+    conservative than Bonferroni, no independence assumption)."""
+    m = len(p_values)
+    order = np.argsort(p_values)
+    adjusted = [0.0] * m
+    running = 0.0
+    for rank, idx in enumerate(order):
+        running = max(running, min(1.0, (m - rank) * float(p_values[idx])))
+        adjusted[idx] = running
+    return adjusted
+
+
+def _parametric_posthoc(labels: list[str], per_group_vals: list[list[float]]) -> list[dict]:
+    """Every pairwise comparison after a one-way ANOVA.
+
+    Two adjusted p-values per pair: Tukey HSD (assumes equal variances —
+    what Prism's default one-way ANOVA workflow reports) and a pairwise
+    Welch t-test with Holm correction (no equal-variance assumption — the
+    role Dunnett's T3 / Games-Howell play after a Welch/Brown-Forsythe
+    ANOVA in Prism; T3 itself isn't in scipy, and Welch + Holm is the
+    standard conservative stand-in). `p_adjusted` is Tukey's, matching the
+    plain-ANOVA omnibus this tool reports as the primary parametric test.
+    """
+    try:
+        tukey = stats.tukey_hsd(*per_group_vals)
+    except Exception:
+        tukey = None
+
+    pairs: list[dict] = []
+    welch_raw: list[float] = []
+    for i in range(len(labels)):
+        for j in range(i + 1, len(labels)):
+            try:
+                p_welch = float(stats.ttest_ind(per_group_vals[i], per_group_vals[j], equal_var=False).pvalue)
+            except Exception:
+                p_welch = 1.0
+            if not np.isfinite(p_welch):
+                p_welch = 1.0
+            welch_raw.append(p_welch)
+            p_tukey = None
+            if tukey is not None:
+                p_tukey = float(tukey.pvalue[i][j])
+                if not np.isfinite(p_tukey):
+                    p_tukey = None
+            pairs.append(
+                {
+                    "group_a": labels[i],
+                    "group_b": labels[j],
+                    "mean_difference": float(np.mean(per_group_vals[j]) - np.mean(per_group_vals[i])),
+                    "p_value_tukey": p_tukey,
+                    "p_value_welch": p_welch,
+                }
+            )
+    for entry, p_adj in zip(pairs, _holm_adjust(welch_raw)):
+        entry["p_value_welch_holm"] = float(p_adj)
+        entry["p_adjusted"] = entry["p_value_tukey"] if entry["p_value_tukey"] is not None else entry["p_value_welch_holm"]
+    return pairs
+
+
+def _shapiro_p(values: list[float]) -> float | None:
+    if len(values) < 3 or len(set(values)) < 2:
+        return None
+    try:
+        return float(stats.shapiro(values).pvalue)
+    except Exception:
+        return None
 
 
 def _fit_lmm_pairwise(
@@ -244,18 +331,24 @@ def _fit_lmm_pairwise(
     }
 
 
-def compare_groups(groups: list[GroupInput]) -> dict:
+def compare_groups(groups: list[GroupInput], test_family: TestFamily = "nonparametric") -> dict:
     """Compare every shared numeric metric across two or more groups of per-video summaries.
+
+    test_family selects the primary test (see module docstring): rank-based
+    Mann-Whitney U / Kruskal-Wallis + Dunn's ("nonparametric", default), or
+    Welch's t-test / one-way ANOVA + Tukey HSD ("parametric"). Every
+    post-hoc entry carries a `p_adjusted` key regardless of family.
 
     Each group's `clusters` (optional): a batch/sample label per entry in
     that group's summaries, same length and order. When every group has
     cluster labels, each metric additionally gets cluster-aware linear
-    mixed-model pairwise p-values alongside the default rank-based test
-    (Mann-Whitney U for 2 groups, Kruskal-Wallis + Dunn's post-hoc for 3+),
-    correcting for repeated measurements sharing a cluster label.
+    mixed-model pairwise p-values alongside the primary test, correcting
+    for repeated measurements sharing a cluster label.
     """
     if len(groups) < 2:
         raise ValueError("compare_groups needs at least 2 groups")
+    if test_family not in ("nonparametric", "parametric"):
+        raise ValueError("test_family must be 'nonparametric' or 'parametric'")
 
     keys = set()
     for g in groups:
@@ -287,37 +380,66 @@ def compare_groups(groups: list[GroupInput]) -> dict:
                     "n": len(vals),
                     "mean": float(np.mean(vals)),
                     "std": float(np.std(vals, ddof=1)) if len(vals) > 1 else 0.0,
+                    "sem": float(np.std(vals, ddof=1) / np.sqrt(len(vals))) if len(vals) > 1 else 0.0,
+                    "shapiro_p": _shapiro_p(vals),
                     "values": vals,
                 }
                 for label, vals in zip(labels, per_group_vals)
             ],
+            "statistic": None,
+            "p_value": None,
         }
 
         has_variance = len({v for vals in per_group_vals for v in vals}) > 1
 
         if len(groups) == 2:
-            entry["test"] = "mann_whitney_u"
-            entry["statistic"] = None
-            entry["p_value"] = None
-            if has_variance:
-                try:
-                    result = stats.mannwhitneyu(per_group_vals[0], per_group_vals[1], alternative="two-sided")
-                    entry["statistic"] = float(result.statistic)
-                    entry["p_value"] = float(result.pvalue)
-                except ValueError:
-                    pass
+            if test_family == "nonparametric":
+                entry["test"] = "mann_whitney_u"
+                if has_variance:
+                    try:
+                        result = stats.mannwhitneyu(per_group_vals[0], per_group_vals[1], alternative="two-sided")
+                        entry["statistic"] = float(result.statistic)
+                        entry["p_value"] = float(result.pvalue)
+                    except ValueError:
+                        pass
+            else:
+                entry["test"] = "welch_t"
+                if has_variance:
+                    try:
+                        result = stats.ttest_ind(per_group_vals[0], per_group_vals[1], equal_var=False)
+                        entry["statistic"] = float(result.statistic)
+                        entry["p_value"] = float(result.pvalue) if np.isfinite(result.pvalue) else None
+                        student = stats.ttest_ind(per_group_vals[0], per_group_vals[1], equal_var=True)
+                        entry["student_t_p_value"] = float(student.pvalue) if np.isfinite(student.pvalue) else None
+                    except ValueError:
+                        pass
         else:
-            entry["test"] = "kruskal_wallis"
-            entry["statistic"] = None
-            entry["p_value"] = None
-            if has_variance:
-                try:
-                    result = stats.kruskal(*per_group_vals)
-                    entry["statistic"] = float(result.statistic)
-                    entry["p_value"] = float(result.pvalue)
-                except ValueError:
-                    pass
-            entry["posthoc"] = _dunns_posthoc(labels, per_group_vals) if entry["p_value"] is not None else None
+            if test_family == "nonparametric":
+                entry["test"] = "kruskal_wallis"
+                if has_variance:
+                    try:
+                        result = stats.kruskal(*per_group_vals)
+                        entry["statistic"] = float(result.statistic)
+                        entry["p_value"] = float(result.pvalue)
+                    except ValueError:
+                        pass
+                entry["posthoc"] = _dunns_posthoc(labels, per_group_vals) if entry["p_value"] is not None else None
+            else:
+                entry["test"] = "anova"
+                entry["welch_anova_p_value"] = None
+                if has_variance:
+                    try:
+                        result = stats.f_oneway(*per_group_vals)
+                        entry["statistic"] = float(result.statistic)
+                        entry["p_value"] = float(result.pvalue) if np.isfinite(result.pvalue) else None
+                    except ValueError:
+                        pass
+                    try:
+                        welch = anova_oneway(per_group_vals, use_var="unequal", welch_correction=True)
+                        entry["welch_anova_p_value"] = float(welch.pvalue) if np.isfinite(welch.pvalue) else None
+                    except Exception:
+                        pass
+                entry["posthoc"] = _parametric_posthoc(labels, per_group_vals) if entry["p_value"] is not None else None
 
         lmm = _fit_lmm_pairwise(labels, per_group_vals, per_group_clusters)
         if lmm is not None:
@@ -329,8 +451,17 @@ def compare_groups(groups: list[GroupInput]) -> dict:
     # interesting differences surface immediately.
     metrics.sort(key=lambda m: (m["p_value"] is None, m["p_value"] if m["p_value"] is not None else 0.0))
 
+    if len(groups) == 2:
+        posthoc_label = "Mann-Whitney U" if test_family == "nonparametric" else "Welch's t-test"
+    else:
+        posthoc_label = (
+            "Dunn's post-hoc (Bonferroni)" if test_family == "nonparametric" else "Tukey HSD post-hoc"
+        )
+
     return {
         "labels": labels,
         "n_videos": [g.n_videos for g in groups],
+        "test_family": test_family,
+        "posthoc_label": posthoc_label,
         "metrics": metrics,
     }

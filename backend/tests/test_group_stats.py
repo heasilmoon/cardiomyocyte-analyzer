@@ -62,6 +62,65 @@ def test_lmm_fields_absent_without_cluster_labels():
     assert "lmm_pairwise" not in bpm_row
 
 
+def test_parametric_two_groups_uses_welch_t():
+    rng = np.random.default_rng(5)
+    a = GroupInput("Control", [_summary(60 + rng.normal(0, 2), 1.0) for _ in range(8)])
+    b = GroupInput("Treatment", [_summary(75 + rng.normal(0, 2), 1.0) for _ in range(8)])
+    result = compare_groups([a, b], test_family="parametric")
+    assert result["test_family"] == "parametric"
+    row = next(m for m in result["metrics"] if m["metric"] == "mean_bpm")
+    assert row["test"] == "welch_t"
+    assert row["p_value"] < 0.001
+    assert row["student_t_p_value"] < 0.001
+    assert row["groups"][0]["sem"] > 0 and row["groups"][0]["sem"] < row["groups"][0]["std"]
+    assert row["groups"][0]["shapiro_p"] is not None
+
+
+def test_parametric_three_groups_anova_tukey_and_welch_holm():
+    rng = np.random.default_rng(6)
+    groups = [
+        GroupInput("Low", [_summary(60 + rng.normal(0, 1.5), 1.0) for _ in range(8)]),
+        GroupInput("Mid", [_summary(61 + rng.normal(0, 1.5), 1.0) for _ in range(8)]),
+        GroupInput("High", [_summary(90 + rng.normal(0, 1.5), 1.0) for _ in range(8)]),
+    ]
+    result = compare_groups(groups, test_family="parametric")
+    row = next(m for m in result["metrics"] if m["metric"] == "mean_bpm")
+    assert row["test"] == "anova"
+    assert row["p_value"] < 0.001
+    assert row["welch_anova_p_value"] < 0.001
+    posthoc = {frozenset((p["group_a"], p["group_b"])): p for p in row["posthoc"]}
+    assert len(posthoc) == 3
+    low_mid = posthoc[frozenset(("Low", "Mid"))]
+    low_high = posthoc[frozenset(("Low", "High"))]
+    assert low_mid["p_value_tukey"] > 0.05 and low_mid["p_value_welch_holm"] > 0.05
+    assert low_high["p_value_tukey"] < 0.01 and low_high["p_value_welch_holm"] < 0.01
+    assert low_high["p_adjusted"] == low_high["p_value_tukey"]
+    assert low_high["mean_difference"] > 0
+    assert result["posthoc_label"] == "Tukey HSD post-hoc"
+
+
+def test_nonparametric_posthoc_carries_generic_p_adjusted():
+    rng = np.random.default_rng(3)
+    groups = [
+        GroupInput(label, [_summary(m + rng.normal(0, 1.5), 1.0) for _ in range(8)])
+        for label, m in (("A", 60), ("B", 75), ("C", 90))
+    ]
+    result = compare_groups(groups)
+    row = next(m for m in result["metrics"] if m["metric"] == "mean_bpm")
+    assert all(p["p_adjusted"] == p["p_value_bonferroni"] for p in row["posthoc"])
+    assert result["posthoc_label"] == "Dunn's post-hoc (Bonferroni)"
+
+
+def test_compare_groups_rejects_unknown_test_family():
+    a = GroupInput("A", [_summary(60, 1.0), _summary(61, 1.0)])
+    b = GroupInput("B", [_summary(70, 1.0), _summary(71, 1.0)])
+    try:
+        compare_groups([a, b], test_family="bayesian")
+        assert False, "expected ValueError"
+    except ValueError:
+        pass
+
+
 def test_compare_groups_requires_at_least_two_groups():
     try:
         compare_groups([GroupInput("Only", [_summary(60, 1.0)])])

@@ -257,16 +257,36 @@ async def analyze_calcium_endpoint(
     roi_y: int | None = Form(default=None),
     roi_w: int | None = Form(default=None),
     roi_h: int | None = Form(default=None),
+    background_mode: Literal["none", "auto", "manual"] = Form(default="none"),
+    bg_x: int | None = Form(default=None),
+    bg_y: int | None = Form(default=None),
+    bg_w: int | None = Form(default=None),
+    bg_h: int | None = Form(default=None),
 ):
+    """background_mode: 'manual' subtracts the mean trace of a user-drawn
+    cell-free rectangle (bg_x/y/w/h, in original-frame pixels — taken from
+    the uncropped frames, so it can lie outside the analysis ROI); 'auto'
+    uses the darkest 5% of pixels; 'none' skips subtraction."""
     upload_path = _save_upload(file)
     try:
         frames, fps = _load_frames(upload_path, fps_override)
+        background_trace = None
+        applied_bg_roi = None
+        if background_mode == "manual":
+            bg_frames, applied_bg_roi = _apply_roi(frames, bg_x, bg_y, bg_w, bg_h)
+            if applied_bg_roi is None:
+                raise HTTPException(
+                    status_code=400, detail="background_mode=manual requires bg_x, bg_y, bg_w and bg_h"
+                )
+            background_trace = bg_frames.mean(axis=(1, 2)).astype("float64")
         frames, applied_roi = _apply_roi(frames, roi_x, roi_y, roi_w, roi_h)
         result = analyze_calcium(
             frames,
             fps,
             min_transients_per_min=min_transients_per_min,
             prominence_frac=prominence_frac,
+            background_trace=background_trace,
+            auto_background=(background_mode == "auto"),
         )
     finally:
         upload_path.unlink(missing_ok=True)
@@ -282,6 +302,7 @@ async def analyze_calcium_endpoint(
         "summary": result.summary,
         "urls": _urls(result_id, result_dir),
         "roi": applied_roi,
+        "background_roi": applied_bg_roi,
     }
 
 
@@ -414,6 +435,12 @@ async def analyze_compare_endpoint(request: Request):
     morphology_mode = form.get("morphology_mode", "2d")
     if morphology_mode not in ("2d", "3d"):
         raise HTTPException(status_code=400, detail="morphology_mode must be '2d' or '3d'")
+    test_family = str(form.get("test_family") or "nonparametric")
+    if test_family not in ("nonparametric", "parametric"):
+        raise HTTPException(status_code=400, detail="test_family must be 'nonparametric' or 'parametric'")
+    error_bar = str(form.get("error_bar") or "sem").lower()
+    if error_bar not in ("sem", "sd"):
+        raise HTTPException(status_code=400, detail="error_bar must be 'sem' or 'sd'")
 
     group_indices = sorted(
         {
@@ -443,7 +470,8 @@ async def analyze_compare_endpoint(request: Request):
     if len(groups) < 2:
         raise HTTPException(status_code=400, detail="Need at least 2 groups, each with at least one video file")
 
-    comparison = compare_groups(groups)
+    comparison = compare_groups(groups, test_family=test_family)
+    comparison["error_bar"] = error_bar
 
     result_id, result_dir = _new_result_dir()
     combined_rows = [{**s, "group": g.label} for g in groups for s in g.summaries]
