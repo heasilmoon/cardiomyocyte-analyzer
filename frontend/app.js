@@ -43,6 +43,25 @@ function fieldLabel(key) {
     mean_time_to_decay_10_s: "평균 감쇠 시간 T10 (s)",
     mean_time_to_decay_50_s: "평균 감쇠 시간 T50 (s)",
     mean_time_to_decay_90_s: "평균 감쇠 시간 T90 (s)",
+    speed_units: "속도 단위",
+    um_per_px: "픽셀 크기 (µm/px)",
+    farneback_winsize: "광류 윈도우 크기 (px)",
+    wave_threshold_frac: "파형 시작/끝 기준 (기준선 위 비율)",
+    baseline_speed: "기준선 속도",
+    n_complete_waves: "완전한 파형 수 (수축파+이완파 모두 검출)",
+    area_units: "면적 단위",
+    mean_max_contraction_speed: "평균 최대 수축 속도 (MCS)",
+    mean_max_relaxation_speed: "평균 최대 이완 속도 (MRS)",
+    mean_mcs_mrs_difference: "평균 MCS−MRS 차이 (MCS/MRS-DS)",
+    max_max_contraction_speed: "최대 수축 속도의 최댓값 (MCS max)",
+    mean_contraction_time_to_peak_s: "평균 수축 time-to-peak (CTP, s)",
+    mean_contraction_peak_to_min_speed_s: "평균 수축 피크→최소속도 (CTPMS, s)",
+    mean_relaxation_time_to_peak_s: "평균 이완 time-to-peak (RTP, s)",
+    mean_relaxation_peak_to_baseline_s: "평균 이완 피크→기준선 (RTPB, s)",
+    mean_contraction_relaxation_time_s: "평균 수축-이완 시간 (CRT, s)",
+    mean_time_between_max_speeds_s: "평균 MCS↔MRS 간격 (TBC-RMS, s)",
+    mean_contraction_relaxation_area: "평균 수축-이완 면적 (CRA)",
+    mean_shortening_area: "평균 단축 면적 (SA)",
     n_transients: "트랜지언트 수",
     mean_frequency_per_min: "평균 빈도 (회/분)",
     mean_frequency_hz: "평균 빈도 (Hz)",
@@ -143,9 +162,13 @@ function renderResults(container, data) {
 
 const beatingSignalMode = document.getElementById("beating-signal-mode");
 const beatingPivFields = document.getElementById("beating-piv-fields");
+const beatingFlowFields = document.getElementById("beating-flow-fields");
 if (beatingSignalMode) {
   const syncPivFieldsVisibility = () => {
     beatingPivFields.style.display = beatingSignalMode.value === "piv" ? "" : "none";
+    if (beatingFlowFields) {
+      beatingFlowFields.style.display = beatingSignalMode.value === "optical_flow" ? "" : "none";
+    }
   };
   beatingSignalMode.addEventListener("change", syncPivFieldsVisibility);
   syncPivFieldsVisibility();
@@ -371,6 +394,9 @@ const compareMorphologyModeField = document.getElementById("compare-morphology-m
 if (compareAnalysisType) {
   const syncMorphologyModeVisibility = () => {
     compareMorphologyModeField.style.display = compareAnalysisType.value === "morphology" ? "" : "none";
+    document.querySelectorAll("#compare-form .beating-mode-field").forEach((el) => {
+      el.style.display = compareAnalysisType.value === "beating" ? "" : "none";
+    });
   };
   compareAnalysisType.addEventListener("change", syncMorphologyModeVisibility);
   syncMorphologyModeVisibility();
@@ -561,6 +587,9 @@ const batchMorphologyModeField = document.getElementById("batch-morphology-mode-
 if (batchAnalysisType) {
   const syncBatchMorphologyModeVisibility = () => {
     batchMorphologyModeField.style.display = batchAnalysisType.value === "morphology" ? "" : "none";
+    document.querySelectorAll("#batch-form .beating-mode-field").forEach((el) => {
+      el.style.display = batchAnalysisType.value === "beating" ? "" : "none";
+    });
   };
   batchAnalysisType.addEventListener("change", syncBatchMorphologyModeVisibility);
   syncBatchMorphologyModeVisibility();

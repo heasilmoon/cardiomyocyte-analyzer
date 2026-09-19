@@ -31,6 +31,8 @@ from app.config import FRONTEND_DIR, MAX_FRAMES, MAX_UPLOAD_BYTES, RESULTS_DIR, 
 from app.utils import result_storage
 from app.utils.video_io import VideoLoadError, extract_first_frame_png, read_video_frames
 
+BeatingSignalMode = Literal["reference", "consecutive", "piv", "optical_flow"]
+
 app = FastAPI(title="Cardiomyocyte Analyzer", version="0.1.0")
 
 app.add_middleware(
@@ -207,15 +209,22 @@ async def analyze_beating_endpoint(
     fps_override: float | None = Form(default=None),
     min_bpm_gap: float | None = Form(default=None),
     prominence_frac: float = Form(default=0.15),
-    signal_mode: Literal["reference", "consecutive", "piv"] = Form(default="reference"),
+    signal_mode: BeatingSignalMode = Form(default="reference"),
     reference_index: int | None = Form(default=None),
     piv_window_size: int = Form(default=32),
     piv_step: int | None = Form(default=None),
+    um_per_px: float | None = Form(default=None),
+    flow_winsize: int = Form(default=15),
+    wave_threshold_frac: float = Form(default=0.10),
     roi_x: int | None = Form(default=None),
     roi_y: int | None = Form(default=None),
     roi_w: int | None = Form(default=None),
     roi_h: int | None = Form(default=None),
 ):
+    """um_per_px / flow_winsize / wave_threshold_frac apply to the
+    'optical_flow' (ContractionWave-style) mode only."""
+    if um_per_px is not None and um_per_px <= 0:
+        raise HTTPException(status_code=400, detail="um_per_px must be > 0")
     upload_path = _save_upload(file)
     try:
         frames, fps = _load_frames(upload_path, fps_override)
@@ -229,6 +238,9 @@ async def analyze_beating_endpoint(
             reference_index=reference_index,
             piv_window_size=piv_window_size,
             piv_step=piv_step,
+            um_per_px=um_per_px,
+            flow_winsize=flow_winsize,
+            wave_threshold_frac=wave_threshold_frac,
         )
     finally:
         upload_path.unlink(missing_ok=True)
@@ -346,9 +358,16 @@ async def analyze_morphology_endpoint(
     return {"result_id": result_id, "summary": result.summary, "urls": _urls(result_id, result_dir)}
 
 
-def _analyze_one(analysis_type: str, morphology_mode: str, frames, fps) -> dict:
+def _analyze_one(
+    analysis_type: str,
+    morphology_mode: str,
+    frames,
+    fps,
+    signal_mode: str = "reference",
+    um_per_px: float | None = None,
+) -> dict:
     if analysis_type == "beating":
-        return analyze_beating(frames, fps).summary
+        return analyze_beating(frames, fps, signal_mode=signal_mode, um_per_px=um_per_px).summary
     if analysis_type == "calcium":
         return analyze_calcium(frames, fps).summary
     if morphology_mode == "2d":
@@ -356,34 +375,56 @@ def _analyze_one(analysis_type: str, morphology_mode: str, frames, fps) -> dict:
     return analyze_morphology_3d(frames).summary
 
 
-async def _summarize_group(files: list[UploadFile], analysis_type: str, morphology_mode: str) -> list[dict]:
+async def _summarize_group(
+    files: list[UploadFile],
+    analysis_type: str,
+    morphology_mode: str,
+    signal_mode: str = "reference",
+    um_per_px: float | None = None,
+) -> list[dict]:
     summaries = []
     for f in files:
         path = _save_upload(f)
         try:
             frames, fps = _load_frames(path, None)
-            summary = _analyze_one(analysis_type, morphology_mode, frames, fps)
+            summary = _analyze_one(analysis_type, morphology_mode, frames, fps, signal_mode, um_per_px)
             summaries.append({"filename": f.filename, **summary})
         finally:
             path.unlink(missing_ok=True)
     return summaries
 
 
+def _parse_um_per_px(raw) -> float | None:
+    if raw is None or str(raw).strip() == "":
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="um_per_px must be a number") from exc
+    if value <= 0:
+        raise HTTPException(status_code=400, detail="um_per_px must be > 0")
+    return value
+
+
 @app.post("/api/analyze/batch")
 async def analyze_batch_endpoint(
     analysis_type: Literal["beating", "calcium", "morphology"] = Form(...),
     morphology_mode: Literal["2d", "3d"] = Form(default="2d"),
+    signal_mode: BeatingSignalMode = Form(default="reference"),
+    um_per_px: str | None = Form(default=None),  # str: an empty form field must mean "not set"
     files: list[UploadFile] = File(...),
 ):
     """Run one analysis over many videos and return a single combined CSV.
 
     Meant for quickly generating this tool's values across an entire real
     dataset (e.g. every recording in a validation study), one row per video.
+    signal_mode / um_per_px are used for beating analyses only.
     """
     if not files:
         raise HTTPException(status_code=400, detail="At least one video file is required")
+    um_per_px = _parse_um_per_px(um_per_px)
 
-    summaries = await _summarize_group(files, analysis_type, morphology_mode)
+    summaries = await _summarize_group(files, analysis_type, morphology_mode, signal_mode, um_per_px)
 
     result_id, result_dir = _new_result_dir()
     pd.DataFrame(summaries).to_csv(result_dir / "data.csv", index=False)
@@ -441,6 +482,12 @@ async def analyze_compare_endpoint(request: Request):
     error_bar = str(form.get("error_bar") or "sem").lower()
     if error_bar not in ("sem", "sd"):
         raise HTTPException(status_code=400, detail="error_bar must be 'sem' or 'sd'")
+    signal_mode = str(form.get("signal_mode") or "reference")
+    if signal_mode not in ("reference", "consecutive", "piv", "optical_flow"):
+        raise HTTPException(
+            status_code=400, detail="signal_mode must be one of: reference, consecutive, piv, optical_flow"
+        )
+    um_per_px = _parse_um_per_px(form.get("um_per_px"))
 
     group_indices = sorted(
         {
@@ -464,7 +511,7 @@ async def analyze_compare_endpoint(request: Request):
             if batches_raw
             else None
         )
-        summaries = await _summarize_group(files, analysis_type, morphology_mode)
+        summaries = await _summarize_group(files, analysis_type, morphology_mode, signal_mode, um_per_px)
         groups.append(GroupInput(label=label, summaries=summaries, clusters=clusters))
 
     if len(groups) < 2:

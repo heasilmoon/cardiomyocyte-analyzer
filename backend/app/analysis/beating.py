@@ -19,6 +19,12 @@ signal. Three signal modes are supported:
   PIVlab's piv_FFTmulti, used by PIV-MyoMonitor for cardiac organoid
   contractility. Richer (a full 2D motion field, not just a scalar) but
   slower than the other two modes.
+- "optical_flow": mean Farneback dense optical-flow speed between
+  consecutive frames (see optical_flow.py), the measurement used by
+  CONTRACTIONWAVE (Scalzo et al., 2021). The speed curve has a contraction
+  wave and a relaxation wave per beat, and the per-beat table switches to
+  ContractionWave's parameter set (MCS, MRS, CT, RT, CRT, TBC-RMS, CRA, SA,
+  ...). Speeds are in µm/s when a pixel size is given, else px/s.
 """
 from __future__ import annotations
 
@@ -28,6 +34,13 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 
+from app.analysis.optical_flow import (
+    FARNEBACK_DEFAULTS,
+    analyze_speed_waves,
+    compute_flow,
+    compute_optical_flow_speed_signal,
+    flow_to_vector_grid,
+)
 from app.analysis.piv import (
     assess_texture,
     compute_piv_field,
@@ -43,7 +56,7 @@ from app.analysis.signal_common import (
 from app.analysis.signal_common import safe_mean as _safe_mean
 from app.analysis.signal_common import time_to_decay as _time_to_decay
 
-SignalMode = Literal["reference", "consecutive", "piv"]
+SignalMode = Literal["reference", "consecutive", "piv", "optical_flow"]
 
 
 @dataclass
@@ -60,6 +73,11 @@ class BeatingResult:
     beats_df: pd.DataFrame
     summary: dict = field(default_factory=dict)
     piv_field: dict | None = None
+    # optical_flow mode only: relaxation-stroke peaks and wave ends (the
+    # peak/trough arrays then hold contraction peaks and wave starts).
+    secondary_peak_indices: np.ndarray | None = None
+    wave_end_indices: np.ndarray | None = None
+    signal_units: str | None = None
 
 
 def _consecutive_diff_signal(frames: np.ndarray) -> np.ndarray:
@@ -101,20 +119,28 @@ def compute_motion_signal(
     fps: float = 30.0,
     piv_window_size: int = 32,
     piv_step: int | None = None,
+    um_per_px: float | None = None,
+    flow_winsize: int = FARNEBACK_DEFAULTS["winsize"],
 ) -> tuple[np.ndarray, int | None]:
     """Motion signal used as the contraction proxy.
 
     frames: (N, H, W) grayscale array.
     Returns (signal, reference_frame_index). reference_frame_index is None
-    for "consecutive" and "piv" modes. In "reference" mode the signal has
-    length N (one value per frame, index 0 included); in "consecutive" and
-    "piv" modes it has length N-1 (one value per frame-to-frame transition).
+    for "consecutive", "piv" and "optical_flow" modes. In "reference" mode
+    the signal has length N (one value per frame, index 0 included); in the
+    other modes it has length N-1 (one value per frame-to-frame transition).
     """
     if frames.ndim != 3:
         raise ValueError("Expected grayscale frames with shape (N, H, W)")
 
     if mode == "consecutive":
         return _consecutive_diff_signal(frames), None
+
+    if mode == "optical_flow":
+        signal = compute_optical_flow_speed_signal(
+            frames, fps, um_per_px=um_per_px, params={"winsize": int(flow_winsize)}
+        )
+        return signal, None
 
     if mode == "piv":
         texture_mask = compute_window_texture_mask(frames[0], window_size=piv_window_size, step=piv_step)
@@ -134,6 +160,109 @@ def compute_motion_signal(
     return signal, reference_index
 
 
+_OPTICAL_FLOW_MEAN_COLUMNS = (
+    "max_contraction_speed",
+    "max_relaxation_speed",
+    "mcs_mrs_difference",
+    "contraction_time_to_peak_s",
+    "contraction_peak_to_min_speed_s",
+    "contraction_time_s",
+    "relaxation_time_to_peak_s",
+    "relaxation_peak_to_baseline_s",
+    "relaxation_time_s",
+    "contraction_relaxation_time_s",
+    "time_between_max_speeds_s",
+    "contraction_relaxation_area",
+    "shortening_area",
+)
+
+
+def _finish_optical_flow(
+    frames: np.ndarray,
+    fps: float,
+    time_s: np.ndarray,
+    raw_signal: np.ndarray,
+    smoothed: np.ndarray,
+    *,
+    estimated_period_s: float,
+    smoothing_window_s: float,
+    prominence_frac: float,
+    wave_threshold_frac: float,
+    um_per_px: float | None,
+    flow_winsize: int,
+) -> BeatingResult:
+    """ContractionWave-style wave analysis of the optical-flow speed curve."""
+    waves = analyze_speed_waves(
+        time_s,
+        smoothed,
+        fps,
+        period_s=estimated_period_s,
+        prominence_frac=prominence_frac,
+        threshold_frac=wave_threshold_frac,
+    )
+    beats_df: pd.DataFrame = waves["cycles_df"]
+    c_idx: np.ndarray = waves["contraction_idx"]
+    units = "um/s" if um_per_px else "px/s"
+    area_units = "um" if um_per_px else "px"
+
+    ibis = beats_df["inter_beat_interval_s"].dropna().to_numpy(dtype=float) if len(beats_df) else np.array([])
+    n_complete = int(beats_df["complete_wave"].sum()) if len(beats_df) else 0
+    summary: dict = {
+        "signal_mode": "optical_flow",
+        "reference_frame_index": None,
+        "speed_units": units,
+        "um_per_px": float(um_per_px) if um_per_px else None,
+        "farneback_winsize": int(flow_winsize),
+        "estimated_period_s": estimated_period_s,
+        "smoothing_window_s": smoothing_window_s,
+        "wave_threshold_frac": wave_threshold_frac,
+        "baseline_speed": waves["baseline_speed"],
+        "n_beats": int(len(beats_df)),
+        "n_complete_waves": n_complete,
+        "duration_s": float(len(raw_signal) / fps),
+        "mean_bpm": float(60.0 / ibis.mean()) if len(ibis) else None,
+        "mean_inter_beat_interval_s": float(ibis.mean()) if len(ibis) else None,
+        "ibi_std_s": float(ibis.std()) if len(ibis) else None,
+        "ibi_cv_percent": float(100.0 * ibis.std() / ibis.mean()) if len(ibis) and ibis.mean() else None,
+    }
+    for col in _OPTICAL_FLOW_MEAN_COLUMNS:
+        summary[f"mean_{col}"] = _safe_mean(beats_df[col]) if len(beats_df) else None
+    if len(beats_df):
+        summary["max_max_contraction_speed"] = float(beats_df["max_contraction_speed"].max())
+    else:
+        summary["max_max_contraction_speed"] = None
+    summary["area_units"] = area_units
+
+    flow_field = None
+    if len(c_idx):
+        strongest = int(c_idx[np.argmax(smoothed[c_idx])])
+        strongest = min(strongest, frames.shape[0] - 2)
+        flow = compute_flow(frames[strongest], frames[strongest + 1], {"winsize": int(flow_winsize)})
+        step = int(max(8, min(frames.shape[1], frames.shape[2]) // 40))
+        flow_field = flow_to_vector_grid(flow, step=step, scale=fps * (float(um_per_px) if um_per_px else 1.0))
+        flow_field["frame_index"] = strongest
+        flow_field["kind"] = "optical_flow"
+        flow_field["units"] = units
+
+    return BeatingResult(
+        fps=fps,
+        n_frames=int(frames.shape[0]),
+        signal_mode="optical_flow",
+        reference_frame_index=None,
+        time_s=time_s,
+        raw_signal=raw_signal,
+        smoothed_signal=smoothed,
+        peak_indices=c_idx,
+        trough_indices=waves["start_idx"],
+        beats_df=beats_df,
+        summary=summary,
+        piv_field=flow_field,
+        secondary_peak_indices=waves["relaxation_idx"],
+        wave_end_indices=waves["end_idx"],
+        signal_units=units,
+    )
+
+
 def analyze_beating(
     frames: np.ndarray,
     fps: float,
@@ -143,7 +272,15 @@ def analyze_beating(
     reference_index: int | None = None,
     piv_window_size: int = 32,
     piv_step: int | None = None,
+    um_per_px: float | None = None,
+    flow_winsize: int = FARNEBACK_DEFAULTS["winsize"],
+    wave_threshold_frac: float = 0.10,
 ) -> BeatingResult:
+    """um_per_px, flow_winsize and wave_threshold_frac only matter in
+    "optical_flow" mode: pixel size (µm) turns speeds into µm/s, flow_winsize
+    is the Farneback averaging window, and wave_threshold_frac is how far
+    above baseline (as a fraction of the signal range) a wave must rise to
+    count as started/ended."""
     raw_signal, used_reference_index = compute_motion_signal(
         frames,
         mode=signal_mode,
@@ -151,6 +288,8 @@ def analyze_beating(
         fps=fps,
         piv_window_size=piv_window_size,
         piv_step=piv_step,
+        um_per_px=um_per_px,
+        flow_winsize=flow_winsize,
     )
     n = len(raw_signal)
     time_s = np.arange(n) / fps
@@ -169,6 +308,22 @@ def analyze_beating(
         min_bpm_gap = float(np.clip(100.0 / estimated_period_s, 30.0, 400.0))
 
     smoothed = smooth(raw_signal, fps, window_seconds=smoothing_window_s)
+
+    if signal_mode == "optical_flow":
+        return _finish_optical_flow(
+            frames,
+            fps,
+            time_s,
+            raw_signal,
+            smoothed,
+            estimated_period_s=estimated_period_s,
+            smoothing_window_s=smoothing_window_s,
+            prominence_frac=prominence_frac,
+            wave_threshold_frac=wave_threshold_frac,
+            um_per_px=um_per_px,
+            flow_winsize=flow_winsize,
+        )
+
     peaks = detect_peaks(smoothed, fps, min_bpm_gap=min_bpm_gap, prominence_frac=prominence_frac)
 
     troughs = []

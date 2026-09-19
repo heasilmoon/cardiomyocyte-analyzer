@@ -38,6 +38,26 @@ Python(FastAPI + OpenCV + scikit-image) 기반으로, Fiji 전체 배포판(수�
   PIV-MyoMonitor 논문이 8~64px 윈도우와 4~16px 스텝 조합을 직접 비교해서 심장 오가노이드 모델에
   대해 실측으로 확정한 값입니다(윈도우 64px는 인접 창 사이 속도가 끊겨 보였고, 32px 이하에서
   매끈했습니다). 다만 스텝을 줄이면 창 개수가 늘어 계산 시간도 늘어난다는 점은 감안하세요.
+  네 번째 옵션 **`optical_flow` 모드**는 [CONTRACTIONWAVE](https://doi.org/10.1016/j.crmeth.2021.100044)
+  (Scalzo et al., 2021, *Cell Reports Methods*)의 측정 방식을 그대로 재현한 것입니다: 연속 프레임
+  사이의 Farneback 조밀 광류(dense optical flow, OpenCV `calcOpticalFlowFarneback`, ContractionWave
+  기본 파라미터 pyr_scale 0.5 / levels 1 / winsize 15 / iterations 1 / poly_n 7 / poly_sigma 1.5)로
+  모든 픽셀의 변위 벡터를 구하고, 벡터 크기의 평균 × fps × 픽셀 크기를 "평균 속도(µm/s)"로 씁니다
+  (`um_per_px`를 안 주면 px/s). 속도 곡선에는 박동마다 **수축파와 이완파 두 개의 봉우리**가
+  나타나며, 이 모드에서는 박동별 표와 요약이 ContractionWave의 파라미터 세트로 바뀝니다 —
+  최대 수축/이완 속도(MCS/MRS)와 그 차이, 수축 time-to-peak(CTP), 수축 피크→최소속도(CTPMS),
+  수축 시간(CT = CTP + CTPMS), 이완 time-to-peak(RTP), 이완 피크→기준선(RTPB), 이완 시간(RT =
+  RTP + RTPB), 수축-이완 시간(CRT = CT + RT), MCS↔MRS 간격(TBC-RMS), 수축-이완 면적(CRA, 파형
+  전체의 속도 적분 = 이동 경로 길이)과 단축 면적(SA, 수축 구간만). 파형의 시작/끝은 기준선(속도
+  10번째 백분위수)보다 `wave_threshold_frac`(기본 0.10 = 신호 범위의 10%)만큼 높은 지점을 넘는
+  곳으로 잡고, 봉우리 쌍은 봉우리 사이 간격의 분포(같은 박동 안의 짧은 간격 vs 이완기 긴 간격)로
+  묶습니다. 이완파를 못 찾은 박동은 `complete_wave = false`로 표시되고 이완 지표는 비게 됩니다.
+  결과 그림에는 가장 강한 수축 시점의 광류 벡터장도 함께 나옵니다. PIV보다 훨씬 빠르고(광류는
+  OpenCV의 C++ 구현) 텍스처 요구도 덜하지만, 화면 전체 평균이므로 세포/조직만 재려면 ROI를
+  지정하세요(ContractionWave도 기본값에서는 전체 평균을 씁니다). ContractionWave 자체는 GPL-2.0
+  Tkinter 데스크톱 프로그램이라 코드를 가져오지 않고 논문과 공개 코드의 계산 정의만 다시
+  구현했습니다 — 같은 영상을 ContractionWave로 돌린 결과(엑셀 내보내기)를 "검증" 탭의 일치도
+  분석에 넣으면 이 모드를 외부 기준과 직접 비교할 수 있습니다.
 - **관심영역(ROI) 선택**: 박동/칼슘 이미징 탭에서 영상을 고르면 첫 프레임 미리보기가 나타나고,
   마우스로 드래그해서 분석할 영역만 지정할 수 있습니다(지정하지 않으면 전체 프레임 사용). 배경/
   organoid의 어두운 중심부처럼 신호가 없거나 신뢰할 수 없는 영역을 미리 제외하면 특히 PIV 모드에서
@@ -183,11 +203,11 @@ Render 대시보드 → 서비스 → **Environment** 탭에서 아래 두 개�
 
 | Endpoint | 설명 |
 |---|---|
-| `POST /api/analyze/beating` | `file`(mp4), `fps_override`, `min_bpm_gap`(선택, 비우면 자동 추정), `prominence_frac`, `signal_mode`(`reference`/`consecutive`/`piv`), `reference_index`, `piv_window_size`(기본 32px), `piv_step`(기본 window_size/2), `roi_x`/`roi_y`/`roi_w`/`roi_h`(선택, 관심영역 픽셀 좌표) |
+| `POST /api/analyze/beating` | `file`(mp4), `fps_override`, `min_bpm_gap`(선택, 비우면 자동 추정), `prominence_frac`, `signal_mode`(`reference`/`consecutive`/`piv`/`optical_flow`), `reference_index`, `piv_window_size`(기본 32px), `piv_step`(기본 window_size/2), `um_per_px`(선택, `optical_flow`용 픽셀 크기 → µm/s), `flow_winsize`(기본 15), `wave_threshold_frac`(기본 0.10), `roi_x`/`roi_y`/`roi_w`/`roi_h`(선택, 관심영역 픽셀 좌표) |
 | `POST /api/analyze/calcium` | `file`(mp4), `fps_override`, `min_transients_per_min`, `prominence_frac`, `roi_x`/`roi_y`/`roi_w`/`roi_h`(선택), `background_mode`(`none`/`auto`/`manual`), `bg_x`/`bg_y`/`bg_w`/`bg_h`(`manual`일 때, 원본 프레임 좌표) |
 | `POST /api/analyze/morphology` | `file`(mp4), `mode`(`2d`/`3d`), `min_object_size`, `separate_touching`, `separation_min_distance`, `compute_texture_alignment` |
-| `POST /api/analyze/compare` | `analysis_type`(`beating`/`calcium`/`morphology`), `morphology_mode`, `test_family`(`nonparametric` 기본/`parametric`), `error_bar`(`sem` 기본/`sd`), 그룹마다 인덱스가 붙은 필드 `group_{i}_label`, `group_{i}_files`(다중), `group_{i}_batches`(선택, 줄바꿈/쉼표로 구분된 배치 라벨) — `i`는 0부터, 그룹 2개 이상(연속 번호일 필요는 없음) |
-| `POST /api/analyze/batch` | `analysis_type`, `morphology_mode`, `files`(다중) — 영상별 결과를 CSV 하나로 |
+| `POST /api/analyze/compare` | `analysis_type`(`beating`/`calcium`/`morphology`), `morphology_mode`, `signal_mode`(박동일 때, 기본 `reference`), `um_per_px`(선택), `test_family`(`nonparametric` 기본/`parametric`), `error_bar`(`sem` 기본/`sd`), 그룹마다 인덱스가 붙은 필드 `group_{i}_label`, `group_{i}_files`(다중), `group_{i}_batches`(선택, 줄바꿈/쉼표로 구분된 배치 라벨) — `i`는 0부터, 그룹 2개 이상(연속 번호일 필요는 없음) |
+| `POST /api/analyze/batch` | `analysis_type`, `morphology_mode`, `signal_mode`(박동일 때), `um_per_px`(선택), `files`(다중) — 영상별 결과를 CSV 하나로 |
 | `POST /api/analyze/colocalization` | `channel_a_file`, `channel_b_file`, `label_a`, `label_b` |
 | `POST /api/validate/agreement` | `file`(CSV), `column_a`, `column_b`, `label_a`, `label_b` |
 | `POST /api/preview_frame` | `file`(mp4) — 첫 프레임을 PNG로 반환 (프론트엔드 ROI 선택기용) |
@@ -227,7 +247,7 @@ python tools/shrink_video.py 원본.mp4 작은클립.mp4 --seconds 5 --width 320
 `backend/benchmarks/beating_accuracy.py`는 **정답을 아는 합성 영상**(속도가 빠른 수축·느린 이완
 파형으로 중심을 향해 수축하는 텍스처 조직, 박동 간격 ±8% 흔들림)을 참 BPM(30/60/90/120/180) ×
 프레임속도(10/15/30 fps) × 센서 노이즈(표준편차 0/5/10/20) × 텍스처 대비(강/약) × 3회 반복 =
-영상 360개로 만들고, 세 가지 신호 모드를 **기본 파라미터 그대로** 돌려서 박동 수가 정답과 얼마나
+영상 360개로 만들고, 네 가지 신호 모드를 **기본 파라미터 그대로** 돌려서 박동 수가 정답과 얼마나
 일치하는지 셉니다(`PYTHONPATH=. python benchmarks/beating_accuracy.py`, 결과는
 `backend/benchmarks/results/`). 이건 실제 영상으로 Fiji/PIVlab과 비교하는 검증(아래 워크플로우)을
 대체하지 못하고, "검출기 자체가 어떤 촬영 조건에서 무너지는가"만 답합니다 — 초점 흔들림, 부유물,
@@ -239,8 +259,11 @@ python tools/shrink_video.py 원본.mp4 작은클립.mp4 --seconds 5 --width 320
 | 30 fps, 노이즈 ≤10 | consecutive | **100%** | **100%** | 0.13% |
 | 30 fps, 노이즈 ≤10, 텍스처 강함 | piv | 91% | 100% | 0.17% |
 | 30 fps, 노이즈 ≤10, 텍스처 약함 | piv | 93% | 100% | 0.21% |
+| 30 fps, 노이즈 ≤10 (텍스처 강/약 모두) | optical_flow | **100%** | **100%** | 0.13% |
 | 15 fps 이상, 노이즈 ≤10, 60 BPM 이상 | reference | 88% | 96% | 0.15% |
-| 전체 그리드 (10 fps·노이즈 20 같은 극단 조건 포함) | reference / consecutive / piv | 61% / 84% / 69% | 68% / 92% / 84% | 0.3% / 0.2% / 0.3% |
+| 15 fps 이상, 노이즈 ≤10, 60 BPM 이상 | optical_flow | 99% | 100% | 0.16% |
+| 노이즈 20 (전체 fps·BPM) | optical_flow | 76% | 93% | 0.46% |
+| 전체 그리드 (10 fps·노이즈 20 같은 극단 조건 포함) | reference / consecutive / piv / optical_flow | 61% / 84% / 69% / 88% | 68% / 92% / 84% / 93% | 0.3% / 0.2% / 0.3% / 0.3% |
 
 이 벤치마크를 처음 돌렸을 때 30 BPM에서 특정 박동 시퀀스가 노이즈와 무관하게 5개 중 3개로만 잡히는
 경우가 있었고, 원인은 자기상관 기반 주기 추정의 **주기 2배 오류**였습니다(박동 간격이 2.1초/1.9초로
@@ -263,11 +286,21 @@ python tools/shrink_video.py 원본.mp4 작은클립.mp4 --seconds 5 --width 320
 - **PIV 모드는 30 fps + 텍스처가 있을 때 reference에 근접**하고(±1개 이내 100%), 프레임속도가
   낮거나 노이즈가 크면 더 빨리 나빠집니다. 벡터장이 필요할 때만 쓰고 박동 수 자체는
   reference/consecutive 모드를 기준으로 삼는 게 안전합니다.
+- **optical_flow 모드는 그리드 전체에서 박동 수를 가장 잘 맞춥니다**(정확 일치 88%, 일반 조건
+  100%). 광류가 픽셀 노이즈를 공간적으로 평균 내기 때문에 노이즈 20에서도 reference보다 훨씬
+  안정적입니다. 처음 구현에서는 이완기 사이의 작은 노이즈 봉우리를 별개 박동으로 세는 경우가
+  있었는데(30 BPM·약한 텍스처에서 5개 → 9개), 박동 앵커(박동당 가장 큰 봉우리)를 먼저 잡고
+  그 근처(주기의 0.6배 이내)에 앵커 높이의 20% 이상인 봉우리만 짝(이완파)으로 붙이도록 바꿔서
+  고쳤습니다 — 위 표는 수정 후 값입니다. 다만 이 합성 영상은 이완이 느리게 설계돼 있어 이완파가
+  작고, 그래서 `n_complete_waves`(수축파+이완파 모두 잡힌 박동 수)는 합성 영상에서 낮게 나옵니다;
+  실제 심근세포 영상에서는 이완파가 보통 뚜렷한 두 번째 봉우리로 나타납니다. 박동 수는 이완파
+  검출 여부와 무관하게 앵커 기준으로 셉니다.
 
 ## 알려진 한계 및 향후 개선 방향
 
 - **픽셀/복셀 단위**: 영상 자체에는 물리적 스케일(µm/px) 정보가 없으므로 모든 크기 지표는
-  픽셀·복셀 단위입니다. 캘리브레이션 값을 입력받아 환산하는 기능은 아직 없습니다.
+  픽셀·복셀 단위입니다. 현재는 박동 분석의 `optical_flow` 모드만 `um_per_px`를 받아 µm/s로
+  환산하며, 형태 분석과 PIV 변위의 캘리브레이션은 아직 없습니다.
 - **ROI 선택은 사각형만 지원합니다**: 박동/칼슘 이미징 탭에서 마우스로 드래그해 관심영역을
   지정할 수 있지만, 사각형 하나만 가능합니다(자유곡선 선택이나 여러 영역 동시 선택은 없음).
   형태 분석(morphology)에는 아직 ROI 기능이 없습니다.
