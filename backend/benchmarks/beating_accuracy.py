@@ -127,7 +127,7 @@ def run_grid(quick: bool) -> pd.DataFrame:
     noises = [0, 5, 10, 20]
     textures = [1.0, 0.25]
     seeds = [0, 1, 2]
-    modes = ["reference", "consecutive", "piv"]
+    modes = ["reference", "consecutive", "piv", "optical_flow"]
     if quick:
         bpms, fpss, noises, textures, seeds = [60, 120], [30], [0, 10], [1.0], [0]
 
@@ -188,7 +188,7 @@ def summarize(df: pd.DataFrame, out_dir: Path) -> str:
 
 
 def heatmap(df: pd.DataFrame, out_dir: Path) -> None:
-    modes = ["reference", "consecutive", "piv"]
+    modes = ["reference", "consecutive", "piv", "optical_flow"]
     fig, axes = plt.subplots(1, len(modes), figsize=(4.6 * len(modes), 4.2), squeeze=False)
     for ax, mode in zip(axes[0], modes):
         sub = df[(df["mode"] == mode) & (df["fps"] == df["fps"].max()) & (df["texture"] == df["texture"].max())]

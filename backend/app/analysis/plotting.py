@@ -24,7 +24,14 @@ def plot_beating(result: BeatingResult, out_path: str) -> None:
     else:
         fig, ax = plt.subplots(figsize=(9, 4))
 
-    ax.plot(result.time_s, result.smoothed_signal, color="#c0392b", linewidth=1.3, label="motion signal")
+    is_flow = result.signal_mode == "optical_flow"
+    ax.plot(
+        result.time_s,
+        result.smoothed_signal,
+        color="#c0392b",
+        linewidth=1.3,
+        label="average speed" if is_flow else "motion signal",
+    )
     if len(result.peak_indices):
         ax.plot(
             result.time_s[result.peak_indices],
@@ -32,7 +39,17 @@ def plot_beating(result: BeatingResult, out_path: str) -> None:
             "o",
             color="#2c3e50",
             markersize=5,
-            label="beat peak",
+            label="contraction peak (MCS)" if is_flow else "beat peak",
+        )
+    secondary = getattr(result, "secondary_peak_indices", None)
+    if secondary is not None and len(secondary):
+        ax.plot(
+            result.time_s[secondary],
+            result.smoothed_signal[secondary],
+            "s",
+            color="#8e44ad",
+            markersize=5,
+            label="relaxation peak (MRS)",
         )
     if len(result.trough_indices):
         ax.plot(
@@ -41,12 +58,28 @@ def plot_beating(result: BeatingResult, out_path: str) -> None:
             "v",
             color="#2980b9",
             markersize=4,
-            label="baseline",
+            label="wave start" if is_flow else "baseline",
         )
+    wave_ends = getattr(result, "wave_end_indices", None)
+    if wave_ends is not None and len(wave_ends):
+        ax.plot(
+            result.time_s[wave_ends],
+            result.smoothed_signal[wave_ends],
+            "^",
+            color="#16a085",
+            markersize=4,
+            label="wave end",
+        )
+    if is_flow and result.summary.get("wave_threshold_frac") is not None:
+        base = result.summary.get("baseline_speed")
+        if base is not None:
+            ax.axhline(base, color="#7f8c8d", linewidth=0.8, linestyle=":", label="baseline")
+    units = getattr(result, "signal_units", None) or "px/s"
     ylabels = {
         "reference": "Mean |frame − reference frame| intensity",
         "consecutive": "Mean frame-to-frame intensity change",
         "piv": "Mean PIV displacement magnitude (px)",
+        "optical_flow": f"Average optical-flow speed ({units.replace('um', 'µm')})",
     }
     ax.set_xlabel("Time (s)")
     ax.set_ylabel(ylabels.get(result.signal_mode, "Motion signal"))
@@ -54,15 +87,22 @@ def plot_beating(result: BeatingResult, out_path: str) -> None:
     ax.legend(loc="upper right", fontsize=8)
 
     if has_piv_field:
-        _draw_piv_field(ax2, result.piv_field)
-        ax2.set_title(f"PIV vector field @ frame {result.piv_field['frame_index']} (strongest beat)", fontsize=10)
+        field = result.piv_field
+        if field.get("kind") == "optical_flow":
+            _draw_piv_field(ax2, field, label=f"speed ({units.replace('um', 'µm')})")
+            ax2.set_title(
+                f"Farneback optical-flow field @ frame {field['frame_index']} (strongest contraction)", fontsize=10
+            )
+        else:
+            _draw_piv_field(ax2, field)
+            ax2.set_title(f"PIV vector field @ frame {field['frame_index']} (strongest beat)", fontsize=10)
 
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
 
 
-def _draw_piv_field(ax, field: dict) -> None:
+def _draw_piv_field(ax, field: dict, label: str = "displacement magnitude (px)") -> None:
     """Vector arrows over a magnitude heatmap — the standard PIV output
     visualization (matches PIVlab/PIV-MyoMonitor's vector-arrow + heatmap
     figures)."""
@@ -76,7 +116,7 @@ def _draw_piv_field(ax, field: dict) -> None:
         alpha=0.85,
     )
     ax.quiver(x, y, u, v, color="white", scale_units="xy", angles="xy", width=0.004)
-    ax.figure.colorbar(im, ax=ax, label="displacement magnitude (px)", fraction=0.046, pad=0.04)
+    ax.figure.colorbar(im, ax=ax, label=label, fraction=0.046, pad=0.04)
     ax.set_xlabel("x (px)")
     ax.set_ylabel("y (px)")
     ax.invert_yaxis()
