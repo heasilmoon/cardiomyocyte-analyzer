@@ -291,7 +291,18 @@
         </div>
         <p class="roi-hint">2요인 실험(예: 세포주 × 처치)이면 그룹마다 "묶음"에 세포주(DC1, DC2 …)를, "그룹 라벨"에
         조건(Vehicle, UT H …)을 넣으세요. 같은 묶음의 막대가 나란히 그려지고(범례 = 조건), 통계는 묶음 안에서
-        첫 번째 조건 대비로 계산됩니다. 묶음을 비우면 지금처럼 그룹을 한 줄로 비교합니다.</p>
+        첫 번째 조건 대비로 계산되고, 요인 두 개(묶음 × 조건)와 상호작용을 한 번에 검정하는
+        two-way ANOVA 표도 같이 나옵니다. 묶음을 비우면 지금처럼 그룹을 한 줄로 비교합니다.</p>
+        <div class="form-row">
+          <div class="field">
+            <label>요인 A 이름 (묶음, 선택)</label>
+            <input type="text" name="factor_a_name" placeholder="예: Cell line" />
+          </div>
+          <div class="field">
+            <label>요인 B 이름 (조건, 선택)</label>
+            <input type="text" name="factor_b_name" placeholder="예: Treatment" />
+          </div>
+        </div>
         <div id="compare-groups"></div>
         <div class="form-row">
           <button type="button" class="roi-reset" id="compare-add-group">+ 그룹 추가</button>

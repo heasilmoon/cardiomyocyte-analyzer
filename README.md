@@ -108,9 +108,13 @@ Python(FastAPI + OpenCV + scikit-image) 기반으로, Fiji 전체 배포판(수�
   **2요인(grouped-bar) 그림**: 그룹마다 "묶음(카테고리)"을 넣으면(예: 세포주 DC1·DC2·UCM1, 라벨은
   Vehicle·UT H) 같은 묶음의 막대가 나란히 그려지고 조건별 색과 범례가 붙습니다 — Prism의
   "grouped" 그래프 형식. 통계는 **묶음 안에서** 첫 번째 조건 대비로 계산합니다(조건 2개면
-  Mann-Whitney U 또는 Welch t, 3개 이상이면 Kruskal-Wallis/ANOVA + 사후검정). 요인 간 상호작용을
-  검정하는 two-way ANOVA는 아직 없습니다. 응답의 `comparison.layout`이 `clustered`이고
-  `per_category`에 묶음별 결과가 들어 있습니다. 그룹마다 **막대 색**을 폼의 색 선택기로 직접 고를 수 있고(비우면 기본
+  Mann-Whitney U 또는 Welch t, 3개 이상이면 Kruskal-Wallis/ANOVA + 사후검정). 여기에 **two-way
+  ANOVA**(`value ~ C(묶음) * C(조건)`, statsmodels OLS + type II 제곱합, 불균형 설계 대응)로 두
+  요인의 주효과와 상호작용 p-value를 지표마다 계산해 그림 제목 아래와 결과표 맨 위에 보여줍니다
+  (모든 묶음에 모든 조건이 있고 최소 한 칸에 영상 2개 이상일 때만; `factor_a_name`/`factor_b_name`
+  으로 요인 이름을 붙일 수 있음). 상호작용이 유의하면 주효과 대신 묶음별 비교(단순효과)를 보고하는
+  게 맞습니다. 응답의 `comparison.layout`이 `clustered`이고 `per_category`에 묶음별 결과,
+  `two_way_anova`에 지표별 결과가 들어 있습니다. 그룹마다 **막대 색**을 폼의 색 선택기로 직접 고를 수 있고(비우면 기본
   팔레트: 대조군 회색, 그다음 Prism 계열 분홍/청록/보라), PNG는 300 dpi로, 같은 그림의 **SVG(글자가 텍스트로 남아 Illustrator/
   Inkscape에서 편집 가능)**도 함께 저장되어 결과 화면에서 내려받을 수 있습니다. 한
   샘플(배치/웰)에서 여러 영상을 찍은 경우, 그룹별로 파일 순서대로
