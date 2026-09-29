@@ -142,6 +142,7 @@ def compute_motion_signal(
     piv_step: int | None = None,
     um_per_px: float | None = None,
     flow_winsize: int = FARNEBACK_DEFAULTS["winsize"],
+    px_per_analysis_px: float = 1.0,
 ) -> tuple[np.ndarray, int | None]:
     """Motion signal used as the contraction proxy.
 
@@ -159,7 +160,13 @@ def compute_motion_signal(
 
     if mode == "optical_flow":
         signal = compute_optical_flow_speed_signal(
-            frames, fps, um_per_px=um_per_px, params={"winsize": int(flow_winsize)}
+            frames,
+            fps,
+            # Physical size of one analysis pixel: µm when calibrated, else
+            # original-video pixels (so px/s doesn't change when frames
+            # are downscaled for analysis).
+            um_per_px=(um_per_px if um_per_px else (px_per_analysis_px if px_per_analysis_px != 1.0 else None)),
+            params={"winsize": int(flow_winsize)},
         )
         return signal, None
 
@@ -210,6 +217,7 @@ def _finish_optical_flow(
     wave_threshold_frac: float,
     um_per_px: float | None,
     flow_winsize: int,
+    px_per_analysis_px: float = 1.0,
 ) -> BeatingResult:
     """ContractionWave-style wave analysis of the optical-flow speed curve."""
     waves = analyze_speed_waves(
@@ -232,6 +240,7 @@ def _finish_optical_flow(
         "reference_frame_index": None,
         "speed_units": units,
         "um_per_px": float(um_per_px) if um_per_px else None,
+        "px_per_analysis_px": float(px_per_analysis_px),
         "farneback_winsize": int(flow_winsize),
         "estimated_period_s": estimated_period_s,
         "smoothing_window_s": smoothing_window_s,
@@ -261,7 +270,9 @@ def _finish_optical_flow(
         strongest = min(strongest, frames.shape[0] - 2)
         flow = compute_flow(frames[strongest], frames[strongest + 1], {"winsize": int(flow_winsize)})
         step = int(max(8, min(frames.shape[1], frames.shape[2]) // 40))
-        flow_field = flow_to_vector_grid(flow, step=step, scale=fps * (float(um_per_px) if um_per_px else 1.0))
+        flow_field = flow_to_vector_grid(
+            flow, step=step, scale=fps * (float(um_per_px) if um_per_px else float(px_per_analysis_px))
+        )
         flow_field["frame_index"] = strongest
         flow_field["kind"] = "optical_flow"
         flow_field["units"] = units
@@ -297,6 +308,7 @@ def analyze_beating(
     um_per_px: float | None = None,
     flow_winsize: int = FARNEBACK_DEFAULTS["winsize"],
     wave_threshold_frac: float = 0.10,
+    px_per_analysis_px: float = 1.0,
 ) -> BeatingResult:
     """um_per_px, flow_winsize and wave_threshold_frac only matter in
     "optical_flow" mode: pixel size (µm) turns speeds into µm/s, flow_winsize
@@ -312,6 +324,7 @@ def analyze_beating(
         piv_step=piv_step,
         um_per_px=um_per_px,
         flow_winsize=flow_winsize,
+        px_per_analysis_px=px_per_analysis_px,
     )
     n = len(raw_signal)
     time_s = np.arange(n) / fps
@@ -344,6 +357,7 @@ def analyze_beating(
             wave_threshold_frac=wave_threshold_frac,
             um_per_px=um_per_px,
             flow_winsize=flow_winsize,
+            px_per_analysis_px=px_per_analysis_px,
         )
 
     peaks = detect_peaks(smoothed, fps, min_bpm_gap=min_bpm_gap, prominence_frac=prominence_frac)
