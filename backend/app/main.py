@@ -621,6 +621,10 @@ async def analyze_compare_endpoint(request: Request):
                 condition_colors[g.label] = col
         comparison["condition_colors"] = condition_colors
         comparison["group_categories"] = categories
+        comparison["factor_names"] = {
+            "a": str(form.get("factor_a_name") or "").strip() or None,
+            "b": str(form.get("factor_b_name") or "").strip() or None,
+        }
     else:
         comparison = compare_groups(groups, test_family=test_family)
     comparison["error_bar"] = error_bar

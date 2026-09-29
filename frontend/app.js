@@ -523,7 +523,32 @@ function renderComparisonResults(container, data) {
 
   let tables;
   if (comparison.layout === "clustered") {
-    tables = comparison.per_category
+    const fa = (comparison.factor_names && comparison.factor_names.a) || "묶음";
+    const fb = (comparison.factor_names && comparison.factor_names.b) || "조건";
+    const tw = comparison.two_way_anova || {};
+    const twKeys = comparison.metric_keys.filter((k) => tw[k]);
+    let twTable = "";
+    if (twKeys.length) {
+      const twRows = twKeys
+        .map((k) => {
+          const r = tw[k];
+          return `<tr><td>${fieldLabel(k)}</td><td>${formatP(r.p_category, pStyle)}</td><td>${formatP(r.p_condition, pStyle)}</td><td>${formatP(r.p_interaction, pStyle)}</td><td>${r.n} (잔차 df ${r.df_residual})</td></tr>`;
+        })
+        .join("");
+      twTable = `
+        <h4 class="compare-category-title">Two-way ANOVA
+          <span class="compare-category-sub">(${fa} × ${fb}, type II 제곱합, 상호작용 포함)</span>
+        </h4>
+        <table class="summary compare-table">
+          <thead><tr><th>지표</th><th>${fa} 주효과 p</th><th>${fb} 주효과 p</th><th>상호작용 p</th><th>n</th></tr></thead>
+          <tbody>${twRows}</tbody>
+        </table>
+        <p class="roi-hint">상호작용 p가 유의하면 "${fb} 효과가 ${fa}에 따라 다르다"는 뜻이라 주효과보다 아래의 묶음별 비교를 보고하세요.
+        모수 검정이므로 잔차의 정규성·등분산을 가정합니다.</p>`;
+    } else {
+      twTable = `<p class="roi-hint">Two-way ANOVA는 모든 묶음에 모든 조건이 있고, 최소 한 칸에 영상이 2개 이상일 때 계산됩니다.</p>`;
+    }
+    tables = twTable + comparison.per_category
       .map(
         (pc) => `
         <h4 class="compare-category-title">${pc.category}

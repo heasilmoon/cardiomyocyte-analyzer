@@ -70,3 +70,26 @@ def test_plot_clustered_comparison_writes_png_and_svg(tmp_path):
     flat["bracket_style"] = "bracket"
     plotting.plot_group_comparison(flat, str(tmp_path / "flat.png"))
     assert (tmp_path / "flat.png").exists()
+
+
+def test_compare_grouped_reports_two_way_anova():
+    rng = np.random.default_rng(6)
+    groups, cats = _design(rng)  # 3 lines x (Vehicle, UT H), 4 videos each
+    comp = compare_grouped(groups, cats)
+    tw = comp["two_way_anova"]
+    assert "mean_bpm" in tw
+    r = tw["mean_bpm"]
+    assert r["sum_sq_type"] == "II"
+    assert r["n"] == 24 and r["df_residual"] == 24 - 6
+    # Strong treatment effect, no interaction built into the synthetic design.
+    assert r["p_condition"] is not None and r["p_condition"] < 0.001
+    assert r["p_interaction"] is not None and r["p_interaction"] > 0.05
+    assert 0 <= r["p_category"] <= 1
+
+
+def test_two_way_anova_skipped_when_a_cell_is_missing():
+    rng = np.random.default_rng(8)
+    groups = [GroupInput("Vehicle", _summaries(rng, 3, 40, 10)), GroupInput("UT H", _summaries(rng, 3, 30, 6)),
+              GroupInput("Vehicle", _summaries(rng, 3, 42, 9))]
+    comp = compare_grouped(groups, ["DC1", "DC1", "DC2"])
+    assert comp["two_way_anova"] == {}

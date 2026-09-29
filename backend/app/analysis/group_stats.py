@@ -46,7 +46,9 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 from scipy import stats
+from statsmodels.formula.api import ols
 from statsmodels.regression.mixed_linear_model import MixedLM
+from statsmodels.stats.anova import anova_lm
 from statsmodels.stats.oneway import anova_oneway
 
 TestFamily = Literal["nonparametric", "parametric"]
@@ -516,6 +518,65 @@ def _describe_single_group(group: GroupInput) -> dict:
     }
 
 
+def _two_way_anova(groups: list[GroupInput], categories: list[str], key: str) -> dict | None:
+    """Two-way ANOVA (type II sums of squares) of one metric with the
+    category (factor A) and the condition label (factor B) as fixed
+    factors, including their interaction: value ~ C(A) * C(B).
+
+    Returns None when the design can't support it: fewer than two levels
+    of either factor, an empty A×B cell (the interaction is then not
+    estimable), or no residual degrees of freedom (needs at least one cell
+    with 2+ videos). Type II is used because designs here are usually
+    unbalanced (different numbers of videos per cell).
+    """
+    rows = []
+    for g, cat in zip(groups, categories):
+        vals, _ = _numeric_values_with_clusters(g.summaries, key, None)
+        rows.extend({"value": float(v), "A": str(cat), "B": str(g.label)} for v in vals)
+    if not rows:
+        return None
+    df = pd.DataFrame(rows)
+    a_levels, b_levels = df["A"].nunique(), df["B"].nunique()
+    if a_levels < 2 or b_levels < 2:
+        return None
+    cells = df.groupby(["A", "B"]).size()
+    if len(cells) < a_levels * b_levels:
+        return None  # missing cell -> interaction not estimable
+    if len(df) - a_levels * b_levels < 1:
+        return None  # no residual df
+    if df["value"].nunique() < 2:
+        return None
+    try:
+        model = ols("value ~ C(A) * C(B)", data=df).fit()
+        table = anova_lm(model, typ=2)
+    except Exception:
+        return None
+
+    def _p(term: str) -> float | None:
+        if term not in table.index:
+            return None
+        p = table.loc[term, "PR(>F)"]
+        return float(p) if np.isfinite(p) else None
+
+    def _f(term: str) -> float | None:
+        if term not in table.index:
+            return None
+        f = table.loc[term, "F"]
+        return float(f) if np.isfinite(f) else None
+
+    return {
+        "p_category": _p("C(A)"),
+        "p_condition": _p("C(B)"),
+        "p_interaction": _p("C(A):C(B)"),
+        "f_category": _f("C(A)"),
+        "f_condition": _f("C(B)"),
+        "f_interaction": _f("C(A):C(B)"),
+        "df_residual": int(table.loc["Residual", "df"]) if "Residual" in table.index else None,
+        "n": int(len(df)),
+        "sum_sq_type": "II",
+    }
+
+
 def compare_grouped(
     groups: list[GroupInput], categories: list[str], test_family: TestFamily = "nonparametric"
 ) -> dict:
@@ -568,10 +629,17 @@ def compare_grouped(
             "Dunn's post-hoc (Bonferroni)" if test_family == "nonparametric" else "Tukey HSD post-hoc"
         )
 
+    two_way = {}
+    for key in metric_keys:
+        res = _two_way_anova(groups, categories, key)
+        if res is not None:
+            two_way[key] = res
+
     return {
         "layout": "clustered",
         "categories": cat_order,
         "conditions": cond_order,
+        "two_way_anova": two_way,
         "labels": [f"{c} · {g.label}" for g, c in zip(groups, categories)],
         "n_videos": [g.n_videos for g in groups],
         "test_family": test_family,

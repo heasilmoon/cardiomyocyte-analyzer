@@ -241,6 +241,13 @@ def _nejm_stars(p: float) -> str:
     return "ns"
 
 
+def _short_p(p: float | None) -> str:
+    """Compact p for crowded subtitles: 'p < 0.001' or 'p = 0.034'."""
+    if p is None:
+        return "p = n/a"
+    return "p < 0.001" if p < 0.001 else f"p = {p:.2g}"
+
+
 def _format_p(p: float | None, style: str = "nejm") -> str:
     """p-value text for brackets/subtitles.
 
@@ -748,8 +755,20 @@ def _draw_clustered_comparison(
 
         title, unit = _metric_display(key, comparison)
         ax.set_ylabel(_AXIS_LABELS.get(unit, unit) if unit else title)
-        ax.set_title(title, fontweight="bold", pad=6)
-        ax.text(letter_x, 1.06, letters[idx % 26], transform=ax.transAxes, fontsize=11, fontweight="bold", va="bottom")
+        tw = (comparison.get("two_way_anova") or {}).get(key)
+        if tw:
+            fa = (comparison.get("factor_names") or {}).get("a") or "category"
+            fb = (comparison.get("factor_names") or {}).get("b") or "condition"
+            sub = (
+                f"Two-way ANOVA: {fa} {_short_p(tw['p_category'])}, {fb} {_short_p(tw['p_condition'])}, "
+                f"{fa}×{fb} {_short_p(tw['p_interaction'])}"
+            )
+            ax.set_title(title, fontweight="bold", pad=14)
+            ax.text(0.5, 1.01, sub, transform=ax.transAxes, ha="center", va="bottom", fontsize=6.3, color="#666666")
+            ax.text(letter_x, 1.13, letters[idx % 26], transform=ax.transAxes, fontsize=11, fontweight="bold", va="bottom")
+        else:
+            ax.set_title(title, fontweight="bold", pad=6)
+            ax.text(letter_x, 1.06, letters[idx % 26], transform=ax.transAxes, fontsize=11, fontweight="bold", va="bottom")
 
     for idx in range(len(metric_keys), nrows * ncols):
         axes[idx // ncols][idx % ncols].axis("off")
