@@ -31,6 +31,9 @@ function fieldLabel(key) {
     px_per_analysis_px: "분석 픽셀 1개 = 원본 픽셀 (px/s는 원본 픽셀 기준)",
     max_frames: "분석 프레임 상한 (MAX_FRAMES)",
     truncated_to_max_frames: "영상이 상한에서 잘렸는가",
+    n_spikes_removed: "제거된 1프레임 스파이크 수 (코덱 키프레임 등)",
+    codec_artifact_warning: "주기적 스파이크(재인코딩 흔적) 감지",
+    detrend_window_s: "기준선 드리프트 제거 창 (s)",
     periodicity_score: "주기성 점수 (0–1, 박동 주기의 자기상관)",
     signal_to_noise: "신호/노이즈 비 (봉우리 높이 ÷ 프레임 노이즈)",
     low_signal_warning: "신호 약함/주기성 없음 경고",
@@ -200,9 +203,17 @@ function renderResults(container, data) {
       </div>`
     : "";
 
+  const codecWarning = summary.codec_artifact_warning
+    ? `<div class="warning-banner">
+        ℹ️ 일정한 간격의 1프레임 스파이크 ${summary.n_spikes_removed}개를 제거했습니다. 재인코딩된 영상의 키프레임(코덱) 흔적으로 보이며,
+        분석 전에 걸러냈으니 결과에는 반영되지 않았습니다. 가능하면 현미경 소프트웨어가 저장한 원본 영상을 쓰세요.
+      </div>`
+    : "";
+
   container.innerHTML = `
     ${truncWarning}
     ${lowSignalWarning}
+    ${codecWarning}
     ${pivWarning}
     ${roiNote}
     ${urls.plot ? `<img src="${API_BASE}${urls.plot}" alt="result plot" />` : ""}

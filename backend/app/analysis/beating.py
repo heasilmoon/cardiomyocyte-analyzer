@@ -48,7 +48,9 @@ from app.analysis.piv import (
     compute_window_texture_mask,
 )
 from app.analysis.signal_common import (
+    despike_single_frame,
     detect_peaks,
+    detrend_baseline,
     estimate_dominant_period_s,
     find_local_min_between,
     periodicity_strength,
@@ -363,6 +365,26 @@ def analyze_beating(
     n = len(raw_signal)
     time_s = np.arange(n) / fps
 
+    # Pre-processing.
+    # (1) Frame-to-frame modes: drop isolated single-frame spikes — the
+    #     keyframe comb of re-encoded video — before anything else looks at
+    #     the signal (the period estimate would otherwise lock onto it).
+    # (2) All modes: remove slow baseline drift (focus/illumination) with a
+    #     rolling low-percentile baseline so the relative prominence test
+    #     compares beats with the local baseline, not with drift.
+    preproc: dict = {"n_spikes_removed": 0, "codec_artifact_warning": False}
+    if signal_mode in ("consecutive", "piv", "optical_flow"):
+        raw_signal, n_spikes, periodic = despike_single_frame(raw_signal)
+        preproc["n_spikes_removed"] = int(n_spikes)
+        preproc["codec_artifact_warning"] = bool(periodic)
+    period_guess = estimate_dominant_period_s(raw_signal, fps)
+    detrend_window_s = float(max(3.0, 4.0 * period_guess))
+    if n / fps > detrend_window_s:
+        raw_signal = detrend_baseline(raw_signal, fps, detrend_window_s)
+        preproc["detrend_window_s"] = round(detrend_window_s, 2)
+    else:
+        preproc["detrend_window_s"] = None
+
     # Auto-tune the smoothing window and minimum peak spacing to the video's
     # own dominant beat period instead of assuming a fixed, fast default.
     # A short fixed window (e.g. 0.15s) undersmooths slow hiPSC-CM beating
@@ -379,7 +401,7 @@ def analyze_beating(
     smoothed = smooth(raw_signal, fps, window_seconds=smoothing_window_s)
 
     if signal_mode == "optical_flow":
-        return _finish_optical_flow(
+        result = _finish_optical_flow(
             frames,
             fps,
             time_s,
@@ -393,6 +415,8 @@ def analyze_beating(
             flow_winsize=flow_winsize,
             px_per_analysis_px=px_per_analysis_px,
         )
+        result.summary.update(preproc)
+        return result
 
     peaks = detect_peaks(smoothed, fps, min_bpm_gap=min_bpm_gap, prominence_frac=prominence_frac)
 
@@ -484,6 +508,7 @@ def analyze_beating(
         "mean_time_to_decay_90_s": _safe_mean(beats_df["time_to_decay_90_s"]) if len(beats_df) else None,
     }
 
+    summary.update(preproc)
     _signal_quality(
         summary, raw_signal, smoothed, fps, estimated_period_s, peaks,
         float(np.mean(smoothed[troughs])) if len(troughs) else float(np.percentile(smoothed, 10)),

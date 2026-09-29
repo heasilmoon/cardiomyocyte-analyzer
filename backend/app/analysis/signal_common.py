@@ -113,6 +113,84 @@ def estimate_dominant_period_s(
     return best_lag / fps
 
 
+def despike_single_frame(signal: np.ndarray, threshold_mads: float = 6.0) -> tuple[np.ndarray, int, bool]:
+    """Remove isolated one- or two-frame spikes from a frame-to-frame motion signal.
+
+    Re-encoded H.264/MPEG videos jump in intensity at every keyframe
+    (typically every 15-60 frames), which a frame-difference or optical-
+    flow signal shows as a perfectly regular comb of spikes 1-2 frames
+    wide — easily mistaken for a 100+ BPM beat. A real contraction spans
+    several frames, so only runs of at most two samples that (a) stand more
+    than `threshold_mads` robust SDs above a 5-point running median and
+    (b) are local maxima (higher than the samples on both sides of the run)
+    are replaced by that median; the rising/falling flanks of real beats
+    are monotonic, not isolated peaks, so they are left alone.
+
+    Returns (cleaned, n_spikes, periodic) where periodic is True when the
+    spikes recur at a near-constant interval (the codec signature).
+    """
+    x = np.asarray(signal, dtype=np.float64)
+    n = len(x)
+    if n < 7:
+        return x.copy(), 0, False
+    med = np.copy(x)
+    med[2:-2] = np.median(np.stack([x[:-4], x[1:-3], x[2:-2], x[3:-1], x[4:]]), axis=0)
+    resid = x - med
+    mad = 1.4826 * float(np.median(np.abs(resid - np.median(resid))))
+    if mad <= 0:
+        mad = float(np.std(resid)) or 1e-12
+    flagged = resid > threshold_mads * mad
+
+    cleaned = x.copy()
+    starts: list[int] = []
+    i = 0
+    while i < n:
+        if not flagged[i]:
+            i += 1
+            continue
+        j = i
+        while j + 1 < n and flagged[j + 1]:
+            j += 1
+        run_len = j - i + 1
+        if run_len <= 2 and i > 0 and j < n - 1:
+            peak = float(np.max(x[i : j + 1]))
+            if peak > x[i - 1] and peak > x[j + 1]:
+                cleaned[i : j + 1] = med[i : j + 1]
+                starts.append(i)
+        i = j + 1
+
+    periodic = False
+    if len(starts) >= 6:
+        gaps = np.diff(np.asarray(starts))
+        g_med = float(np.median(gaps))
+        if g_med > 2:
+            frac_regular = float(np.mean(np.abs(gaps - g_med) <= 0.15 * g_med))
+            periodic = frac_regular >= 0.7
+    n_spikes = int(sum(1 for i0 in starts for _ in [0]))  # runs replaced
+    return cleaned, n_spikes, periodic
+
+
+def detrend_baseline(signal: np.ndarray, fps: float, window_s: float, percentile: float = 10.0) -> np.ndarray:
+    """Subtract a slowly varying baseline (rolling low percentile).
+
+    Slow focus / illumination drift over tens of seconds inflates the
+    signal range in reference mode so that the relative prominence test
+    misses real beats. A rolling 10th-percentile baseline (window a few
+    beats long) tracks diastole without following the beats themselves.
+    """
+    from scipy.ndimage import percentile_filter
+
+    n = len(signal)
+    win = int(round(window_s * fps))
+    if n < 10 or win < 3:
+        return np.asarray(signal, dtype=np.float64)
+    win = min(win, n)
+    if win % 2 == 0:
+        win += 1
+    base = percentile_filter(np.asarray(signal, dtype=np.float64), percentile, size=win, mode="nearest")
+    return signal - base
+
+
 def periodicity_strength(signal: np.ndarray, fps: float, period_s: float) -> float:
     """Normalised autocorrelation at the estimated beat period (0-1).
 

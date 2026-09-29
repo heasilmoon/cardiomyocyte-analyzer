@@ -73,9 +73,11 @@ _EXCLUDED_METRICS = {
     "downscale_factor",
     "px_per_analysis_px",
     "max_frames",
-    # Signal-quality diagnostics (see beating._signal_quality)
+    # Signal-quality / pre-processing diagnostics (see beating.analyze_beating)
     "periodicity_score",
     "signal_to_noise",
+    "n_spikes_removed",
+    "detrend_window_s",
     "um_per_px",
     "farneback_winsize",
     "wave_threshold_frac",
