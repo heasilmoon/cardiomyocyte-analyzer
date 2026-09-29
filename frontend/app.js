@@ -503,6 +503,12 @@ function setupCompareGroups() {
   if (!container || !addBtn) return;
 
   let nextIndex = 0;
+  // Same defaults as the backend's _GROUP_COLORS: control in gray, then
+  // Prism-like pink / teal / purple / lavender.
+  const defaultColors = [
+    "#595959", "#ec4b81", "#2a9d8f", "#5b3a9b", "#b39ddb",
+    "#e67e22", "#3498db", "#27ae60", "#c0392b", "#7f8c8d",
+  ];
 
   function groupCount() {
     return container.querySelectorAll(".compare-group-block").length;
@@ -524,6 +530,10 @@ function setupCompareGroups() {
         <div class="field">
           <label>그룹 라벨</label>
           <input type="text" name="group_${idx}_label" value="${defaultLabel || `Group ${idx + 1}`}" />
+        </div>
+        <div class="field compare-color-field">
+          <label>막대 색</label>
+          <input type="color" name="group_${idx}_color" value="${defaultColors[idx % defaultColors.length]}" title="그래프에서 이 그룹의 막대 색" />
         </div>
         <div class="field">
           <label>그룹 영상 (여러 개 선택)</label>

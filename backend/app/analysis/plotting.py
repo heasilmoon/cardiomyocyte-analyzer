@@ -456,6 +456,20 @@ _GROUP_COLORS = [
 ]
 
 
+def _resolve_group_colors(comparison: dict, n_groups: int) -> list[str]:
+    """Bar colors per group: the user's choice (comparison["group_colors"],
+    hex strings in group order, None = default) or the built-in palette."""
+    chosen = comparison.get("group_colors") or []
+    colors = []
+    for i in range(n_groups):
+        pick = chosen[i] if i < len(chosen) else None
+        if isinstance(pick, str) and len(pick) == 7 and pick.startswith("#"):
+            colors.append(pick)
+        else:
+            colors.append(_GROUP_COLORS[i % len(_GROUP_COLORS)])
+    return colors
+
+
 def _figure_caption(comparison: dict, error_bar: str, p_style: str) -> str:
     """One-line methods caption for the figure footer, in the wording a
     figure legend would use."""
@@ -535,7 +549,7 @@ def _draw_group_comparison(comparison: dict, metrics: list, error_bar: str, p_st
             errs = [g["std"] for g in groups]
         else:
             errs = [g.get("sem", g["std"] / np.sqrt(g["n"]) if g["n"] > 1 else 0.0) for g in groups]
-        colors = [_GROUP_COLORS[i % len(_GROUP_COLORS)] for i in range(n_groups)]
+        colors = _resolve_group_colors(comparison, n_groups)
 
         ax.bar(xs, means, width=0.6, color=colors, alpha=0.85, edgecolor="black", linewidth=0.7, zorder=2)
         ax.errorbar(xs, means, yerr=errs, fmt="none", ecolor="black", elinewidth=0.8, capsize=2.5, capthick=0.8, zorder=4)

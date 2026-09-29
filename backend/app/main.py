@@ -499,6 +499,7 @@ async def analyze_compare_endpoint(request: Request):
     )
 
     groups: list[GroupInput] = []
+    group_colors: list[str | None] = []
     for idx in group_indices:
         files = [
             f for f in form.getlist(f"group_{idx}_files") if isinstance(f, StarletteUploadFile) and f.filename
@@ -506,6 +507,10 @@ async def analyze_compare_endpoint(request: Request):
         if not files:
             continue
         label = str(form.get(f"group_{idx}_label") or f"Group {idx + 1}").strip() or f"Group {idx + 1}"
+        color_raw = str(form.get(f"group_{idx}_color") or "").strip()
+        if color_raw and not re.fullmatch(r"#[0-9a-fA-F]{6}", color_raw):
+            raise HTTPException(status_code=400, detail=f"group_{idx}_color must be a hex color like #ec4b81")
+        group_colors.append(color_raw.lower() or None)
         batches_raw = form.get(f"group_{idx}_batches")
         clusters = (
             _parse_batch_labels(str(batches_raw), len(files), f"group_{idx}_batches")
@@ -525,6 +530,7 @@ async def analyze_compare_endpoint(request: Request):
     comparison = compare_groups(groups, test_family=test_family)
     comparison["error_bar"] = error_bar
     comparison["p_style"] = p_style
+    comparison["group_colors"] = group_colors
     # Units that depend on the analysis settings (optical_flow speeds are
     # µm/s only when a pixel size was given) — for the figure's axis labels.
     units = {}

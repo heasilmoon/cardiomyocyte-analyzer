@@ -178,3 +178,14 @@ table.compare-table th {
     --muted: #9aa0a6;
   }
 }
+
+/* Per-group bar color picker in the group comparison form */
+.compare-color-field input[type="color"] {
+  width: 3.2rem;
+  height: 2.2rem;
+  padding: 0.1rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+}
