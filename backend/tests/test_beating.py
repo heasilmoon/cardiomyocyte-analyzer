@@ -165,3 +165,23 @@ def test_analyze_beating_piv_mode_no_warning_on_textured_video():
     frames = _make_pulsing_frames(n_frames=90, fps=fps, hz=1.0, size=64, textured=True)
     result = analyze_beating(frames, fps, signal_mode="piv", piv_window_size=16, piv_step=8)
     assert result.summary["piv_low_texture_warning"] is False
+
+
+def test_low_signal_warning_flags_non_beating_noise_but_not_real_beats():
+    from benchmarks.beating_accuracy import base_tissue_image, render_video
+
+    rng = np.random.default_rng(0)
+    base = base_tissue_image(rng, 1.0)
+    static = np.clip(base[None] + rng.normal(0, 5, (300, *base.shape)), 0, 255).astype(np.uint8)
+    s = analyze_beating(static, 30.0, signal_mode="optical_flow").summary
+    # Optical flow on pure sensor noise still "finds" many beats — the QC flag must catch it.
+    assert s["n_beats"] > 5
+    assert s["low_signal_warning"] is True
+    assert s["periodicity_score"] < 0.25
+
+    frames, beats = render_video(60, 30, 0, 1.0, 0)
+    for mode in ("reference", "optical_flow"):
+        ok = analyze_beating(frames, 30.0, signal_mode=mode).summary
+        assert ok["n_beats"] == len(beats)
+        assert ok["low_signal_warning"] is False
+        assert ok["periodicity_score"] > 0.4

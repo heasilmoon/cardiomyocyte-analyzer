@@ -31,6 +31,9 @@ function fieldLabel(key) {
     px_per_analysis_px: "분석 픽셀 1개 = 원본 픽셀 (px/s는 원본 픽셀 기준)",
     max_frames: "분석 프레임 상한 (MAX_FRAMES)",
     truncated_to_max_frames: "영상이 상한에서 잘렸는가",
+    periodicity_score: "주기성 점수 (0–1, 박동 주기의 자기상관)",
+    signal_to_noise: "신호/노이즈 비 (봉우리 높이 ÷ 프레임 노이즈)",
+    low_signal_warning: "신호 약함/주기성 없음 경고",
     analysis_frame_size: "분석에 쓴 프레임 크기 (px)",
     duration_s: "영상 길이 (s)",
     mean_bpm: "평균 박동수 (BPM)",
@@ -189,8 +192,17 @@ function renderResults(container, data) {
       </div>`
     : "";
 
+  const lowSignalWarning = summary.low_signal_warning
+    ? `<div class="warning-banner">
+        ⚠️ 박동 신호가 약하거나 주기성이 없습니다 (주기성 점수 ${formatValue(summary.periodicity_score)}, 신호/노이즈 ${formatValue(summary.signal_to_noise)}).
+        검출된 박동 수·BPM은 노이즈일 가능성이 높으니 그대로 쓰지 마세요. 영상을 눈으로 확인하고, 실제로 거의 안 뛰면
+        "박동 없음/극저빈도"로 기록하세요. 약하게 뛰는 거라면 ROI로 조직만 지정하고 피크 민감도를 올려(0.25–0.3) 다시 분석하세요.
+      </div>`
+    : "";
+
   container.innerHTML = `
     ${truncWarning}
+    ${lowSignalWarning}
     ${pivWarning}
     ${roiNote}
     ${urls.plot ? `<img src="${API_BASE}${urls.plot}" alt="result plot" />` : ""}

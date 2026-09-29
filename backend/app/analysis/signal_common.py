@@ -113,6 +113,45 @@ def estimate_dominant_period_s(
     return best_lag / fps
 
 
+def periodicity_strength(signal: np.ndarray, fps: float, period_s: float) -> float:
+    """Normalised autocorrelation at the estimated beat period (0-1).
+
+    Near 1 for a clean, regular beat; near 0 for noise or a signal with no
+    repeating structure. Used as a quality flag: when it is low, the "beats"
+    the detector reports are probably noise bumps.
+    """
+    n = len(signal)
+    lag = int(round(period_s * fps))
+    if n < 10 or lag < 1 or lag >= n:
+        return 0.0
+    x = signal.astype(np.float64) - np.mean(signal)
+    denom = float(np.dot(x, x))
+    if denom <= 0:
+        return 0.0
+    # Search a small window around the nominal lag so slight period jitter
+    # doesn't understate the strength.
+    lo, hi = max(1, int(lag * 0.9)), min(n - 1, int(np.ceil(lag * 1.1)))
+    best = 0.0
+    for k in range(lo, hi + 1):
+        val = float(np.dot(x[:-k], x[k:])) / denom
+        best = max(best, val)
+    return float(np.clip(best, 0.0, 1.0))
+
+
+def signal_to_noise(raw: np.ndarray, smoothed: np.ndarray, peak_indices, baseline: float) -> float | None:
+    """Mean peak height above baseline divided by the robust noise level
+    (1.4826 x MAD of raw - smoothed, i.e. the frame-to-frame jitter the
+    smoothing removed). None when there are no peaks."""
+    if peak_indices is None or len(peak_indices) == 0:
+        return None
+    resid = raw.astype(np.float64) - smoothed.astype(np.float64)
+    noise = 1.4826 * float(np.median(np.abs(resid - np.median(resid))))
+    if noise <= 0:
+        noise = float(np.std(resid)) or 1e-12
+    height = float(np.mean(smoothed[np.asarray(peak_indices, dtype=int)]) - baseline)
+    return float(height / noise)
+
+
 def find_local_min_between(signal: np.ndarray, start: int, end: int) -> int:
     """Index of the minimum value of signal within [start, end)."""
     start = max(start, 0)
