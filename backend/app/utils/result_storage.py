@@ -62,7 +62,9 @@ def upload_result(result_id: str, result_dir: Path, analysis_type: str, summary:
     if client is None:
         return
     try:
-        for filename in ("plot.png", "plot.svg", "data.csv", "summary.json"):
+        names = ["plot.png", "plot.svg", "data.csv", "summary.json"]
+        names += sorted(p.name for p in result_dir.glob("panel_*.png")) + sorted(p.name for p in result_dir.glob("panel_*.svg"))
+        for filename in names:
             path = result_dir / filename
             if not path.exists():
                 continue

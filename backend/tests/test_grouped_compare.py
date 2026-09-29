@@ -93,3 +93,23 @@ def test_two_way_anova_skipped_when_a_cell_is_missing():
               GroupInput("Vehicle", _summaries(rng, 3, 42, 9))]
     comp = compare_grouped(groups, ["DC1", "DC1", "DC2"])
     assert comp["two_way_anova"] == {}
+
+
+def test_individual_panels_are_written_for_both_layouts(tmp_path):
+    rng = np.random.default_rng(9)
+    groups, cats = _design(rng)
+    comp = compare_grouped(groups, cats)
+    comp["error_bar"] = "sem"
+    panels = plotting.plot_group_comparison(comp, str(tmp_path / "plot.png"), panels_dir=str(tmp_path))
+    assert len(panels) == len(comp["metric_keys"])
+    for p in panels:
+        assert (tmp_path / p["png"]).exists() and (tmp_path / p["svg"]).exists()
+        assert p["png"].startswith("panel_")
+    from app.analysis.group_stats import compare_groups
+    flat = compare_groups(groups[:2])
+    sub = tmp_path / "sub"; sub.mkdir()
+    flat_panels = plotting.plot_group_comparison(flat, str(tmp_path / "flat.png"), panels_dir=str(sub))
+    assert len(flat_panels) == len(flat["metrics"])
+    assert all((sub / p["png"]).exists() for p in flat_panels)
+    # Without panels_dir nothing extra is written and the return is empty.
+    assert plotting.plot_group_comparison(flat, str(tmp_path / "flat2.png")) == []
