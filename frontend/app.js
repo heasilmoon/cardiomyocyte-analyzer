@@ -29,6 +29,8 @@ function fieldLabel(key) {
     n_frames: "프레임 수",
     downscale_factor: "분석 시 축소 배율 (1 = 원본 크기)",
     px_per_analysis_px: "분석 픽셀 1개 = 원본 픽셀 (px/s는 원본 픽셀 기준)",
+    max_frames: "분석 프레임 상한 (MAX_FRAMES)",
+    truncated_to_max_frames: "영상이 상한에서 잘렸는가",
     analysis_frame_size: "분석에 쓴 프레임 크기 (px)",
     duration_s: "영상 길이 (s)",
     mean_bpm: "평균 박동수 (BPM)",
@@ -179,7 +181,16 @@ function renderResults(container, data) {
     ? `<p class="roi-applied-note">적용된 ROI: (${roi.x}, ${roi.y}), ${roi.w}×${roi.h}px (전체 영상이 아닌 이 영역만 분석했습니다)</p>`
     : "";
 
+  const truncWarning = summary.truncated_to_max_frames
+    ? `<div class="warning-banner">
+        ⚠️ 영상이 길어서 앞 ${summary.max_frames}프레임(약 ${(summary.max_frames / (summary.fps || 30)).toFixed(0)}초)만 분석했습니다.
+        나머지는 버려졌어요. 전체를 쓰려면 서버를 켤 때 MAX_FRAMES 환경변수를 늘리거나(예: MAX_FRAMES=6000),
+        tools/shrink_video.py로 필요한 구간만 잘라 올리세요.
+      </div>`
+    : "";
+
   container.innerHTML = `
+    ${truncWarning}
     ${pivWarning}
     ${roiNote}
     ${urls.plot ? `<img src="${API_BASE}${urls.plot}" alt="result plot" />` : ""}
