@@ -72,6 +72,7 @@ _EXCLUDED_METRICS = {
     "fps",
     "downscale_factor",
     "px_per_analysis_px",
+    "max_frames",
     "um_per_px",
     "farneback_winsize",
     "wave_threshold_frac",

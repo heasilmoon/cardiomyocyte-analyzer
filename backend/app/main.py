@@ -200,6 +200,10 @@ def _scale_um_per_px(um_per_px: float | None, scale: float) -> float | None:
 def _stamp_scale(summary: dict, frames, scale: float) -> None:
     summary["downscale_factor"] = round(float(scale), 4)
     summary["analysis_frame_size"] = f"{frames.shape[2]}x{frames.shape[1]}"
+    # Exactly MAX_FRAMES frames read almost always means the recording was
+    # longer and only its first MAX_FRAMES frames were analysed.
+    summary["max_frames"] = int(MAX_FRAMES)
+    summary["truncated_to_max_frames"] = bool(frames.shape[0] >= MAX_FRAMES)
 
 
 def _apply_roi(
