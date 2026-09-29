@@ -62,7 +62,7 @@ def upload_result(result_id: str, result_dir: Path, analysis_type: str, summary:
     if client is None:
         return
     try:
-        for filename in ("plot.png", "data.csv", "summary.json"):
+        for filename in ("plot.png", "plot.svg", "data.csv", "summary.json"):
             path = result_dir / filename
             if not path.exists():
                 continue

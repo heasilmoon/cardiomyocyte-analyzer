@@ -231,13 +231,184 @@ def _draw_orientation_map(ax, orientation_map: np.ndarray, coherence_map: np.nda
     ax.axis("off")
 
 
-def _format_p(p: float | None) -> str:
-    """GraphPad Prism-style p-value text: exact to 4 decimals, '< 0.0001' below that."""
+def _format_p(p: float | None, style: str = "value") -> str:
+    """p-value text for brackets/subtitles.
+
+    style "value": GraphPad Prism-style exact p (4 decimals, '< 0.0001').
+    style "stars": the asterisk convention (* < 0.05, ** < 0.01,
+    *** < 0.001, **** < 0.0001, 'ns' otherwise).
+    """
     if p is None:
-        return "p = n/a"
+        return "n/a" if style == "stars" else "p = n/a"
+    if style == "stars":
+        if p < 0.0001:
+            return "****"
+        if p < 0.001:
+            return "***"
+        if p < 0.01:
+            return "**"
+        if p < 0.05:
+            return "*"
+        return "ns"
     if p < 0.0001:
         return "p < 0.0001"
     return f"p = {p:.4f}"
+
+
+# Publication display names: (title, y-axis label). Keys are the summary
+# fields of the beating / calcium / morphology analyses. Anything not listed
+# is prettified from its key by _metric_display().
+_METRIC_DISPLAY: dict[str, tuple[str, str]] = {
+    # Beating (reference / consecutive / piv)
+    "n_beats": ("Number of beats", "count"),
+    "mean_bpm": ("Beat rate", "BPM"),
+    "mean_inter_beat_interval_s": ("Inter-beat interval", "s"),
+    "ibi_std_s": ("Inter-beat interval SD", "s"),
+    "ibi_cv_percent": ("Beat rate variability", "IBI CV (%)"),
+    "mean_amplitude": ("Contraction amplitude", "a.u."),
+    "amplitude_cv_percent": ("Amplitude variability", "CV (%)"),
+    "mean_contraction_time_s": ("Contraction time", "s"),
+    "mean_relaxation_time_s": ("Relaxation time", "s"),
+    "mean_max_contraction_velocity": ("Max. contraction velocity", "a.u./s"),
+    "mean_max_relaxation_velocity": ("Max. relaxation velocity", "a.u./s"),
+    "mean_time_to_decay_10_s": ("Time to 10% relaxation", "s"),
+    "mean_time_to_decay_50_s": ("Time to 50% relaxation", "s"),
+    "mean_time_to_decay_90_s": ("Time to 90% relaxation", "s"),
+    "estimated_period_s": ("Estimated beat period", "s"),
+    "duration_s": ("Recording length", "s"),
+    # Beating (optical_flow, ContractionWave parameters)
+    "n_complete_waves": ("Complete contraction–relaxation waves", "count"),
+    "baseline_speed": ("Baseline speed", "speed"),
+    "mean_max_contraction_speed": ("Max. contraction speed (MCS)", "speed"),
+    "mean_max_relaxation_speed": ("Max. relaxation speed (MRS)", "speed"),
+    "mean_mcs_mrs_difference": ("MCS − MRS", "speed"),
+    "max_max_contraction_speed": ("Peak MCS", "speed"),
+    "mean_contraction_time_to_peak_s": ("Contraction time-to-peak (CTP)", "s"),
+    "mean_contraction_peak_to_min_speed_s": ("Contraction peak to min. speed (CTPMS)", "s"),
+    "mean_relaxation_time_to_peak_s": ("Relaxation time-to-peak (RTP)", "s"),
+    "mean_relaxation_peak_to_baseline_s": ("Relaxation peak to baseline (RTPB)", "s"),
+    "mean_contraction_relaxation_time_s": ("Contraction–relaxation time (CRT)", "s"),
+    "mean_time_between_max_speeds_s": ("Time between MCS and MRS", "s"),
+    "mean_contraction_relaxation_area": ("Contraction–relaxation area (CRA)", "area"),
+    "mean_shortening_area": ("Shortening area (SA)", "area"),
+    # Calcium
+    "n_transients": ("Number of Ca²⁺ transients", "count"),
+    "mean_frequency_per_min": ("Ca²⁺ transient frequency", "per min"),
+    "mean_frequency_hz": ("Ca²⁺ transient frequency", "Hz"),
+    "mean_inter_peak_interval_s": ("Inter-transient interval", "s"),
+    "mean_amplitude_df_f0": ("Ca²⁺ transient amplitude", "ΔF/F₀"),
+    "max_amplitude_df_f0": ("Peak Ca²⁺ amplitude", "ΔF/F₀"),
+    "mean_start_to_peak_s": ("Start-to-peak time", "s"),
+    "mean_peak_to_end_s": ("Peak-to-end time", "s"),
+    "mean_transient_duration_s": ("Transient duration", "s"),
+    "mean_ctd50_s": ("CTD50", "s"),
+    "mean_ctd90_s": ("CTD90", "s"),
+    "mean_rise_time_10_90_s": ("Rise time (10–90%)", "s"),
+    "mean_decay_tau_s": ("Decay time constant τ", "s"),
+    # Morphology
+    "n_objects": ("Number of objects", "count"),
+    "mean_area_px": ("Mean object area", "px²"),
+    "median_area_px": ("Median object area", "px²"),
+    "mean_eccentricity": ("Eccentricity", ""),
+    "total_covered_area_px": ("Total covered area", "px²"),
+    "coverage_fraction": ("Coverage fraction", ""),
+    "mean_volume_voxels": ("Mean object volume", "voxels"),
+    "median_volume_voxels": ("Median object volume", "voxels"),
+    "total_volume_voxels": ("Total volume", "voxels"),
+    "alignment_score": ("Alignment score", "0–1"),
+    "mean_orientation_deg": ("Mean orientation", "°"),
+    "alignment_score_3d": ("Alignment score (3D)", "0–1"),
+    "texture_alignment_score": ("Structure-tensor alignment", "0–1"),
+    "texture_mean_orientation_deg": ("Structure-tensor orientation", "°"),
+    "texture_mean_coherence": ("Coherence", "0–1"),
+    "texture_alignment_score_3d": ("Structure-tensor alignment (3D)", "0–1"),
+    "texture_mean_fractional_anisotropy": ("Fractional anisotropy", "0–1"),
+}
+
+_UNIT_SUFFIXES = {
+    "_s": "s",
+    "_percent": "%",
+    "_hz": "Hz",
+    "_px": "px",
+    "_deg": "°",
+    "_voxels": "voxels",
+    "_df_f0": "ΔF/F₀",
+    "_per_min": "per min",
+}
+
+
+def _metric_display(key: str, comparison: dict | None = None) -> tuple[str, str]:
+    """Clean (title, y-axis label) for a summary field.
+
+    Speed/area units for the optical_flow metrics depend on whether a pixel
+    size was given, so they are filled from the videos' own summaries when
+    available (comparison["units"]).
+    """
+    units = (comparison or {}).get("units") or {}
+    if key in _METRIC_DISPLAY:
+        title, unit = _METRIC_DISPLAY[key]
+        if unit == "speed":
+            unit = units.get("speed_units", "px/s").replace("um", "µm")
+        elif unit == "area":
+            unit = units.get("area_units", "px").replace("um", "µm")
+        return title, unit
+    name = key
+    unit = ""
+    for suffix, u in _UNIT_SUFFIXES.items():
+        if name.endswith(suffix):
+            name = name[: -len(suffix)]
+            unit = u
+            break
+    if name.startswith("mean_"):
+        name = name[5:]
+    name = name.replace("_", " ").strip()
+    return (name[:1].upper() + name[1:]) if name else key, unit
+
+
+# Unit -> y-axis label with the quantity spelled out (a bare "s" reads badly).
+_AXIS_LABELS = {
+    "s": "Time (s)",
+    "BPM": "Beats per minute",
+    "count": "Count",
+    "a.u.": "Amplitude (a.u.)",
+    "a.u./s": "Velocity (a.u./s)",
+    "Hz": "Frequency (Hz)",
+    "per min": "Frequency (min⁻¹)",
+    "ΔF/F₀": "ΔF/F₀",
+    "px²": "Area (px²)",
+    "voxels": "Volume (voxels)",
+    "°": "Angle (°)",
+    "0–1": "Score (0–1)",
+    "µm/s": "Speed (µm/s)",
+    "px/s": "Speed (px/s)",
+    "µm": "Path length (µm)",
+    "px": "Path length (px)",
+}
+
+
+# Journal-style rcParams for the comparison figure only (applied via
+# rc_context so the other plots are unaffected). Arial is the usual request
+# of biomedical journals; Liberation Sans is its metric-compatible stand-in
+# on Linux servers, DejaVu the last fallback.
+_PUB_RC = {
+    "font.family": "sans-serif",
+    "font.sans-serif": ["Arial", "Helvetica", "Liberation Sans", "DejaVu Sans"],
+    "font.size": 8,
+    "axes.linewidth": 0.8,
+    "axes.labelsize": 8,
+    "axes.titlesize": 9,
+    "xtick.labelsize": 7.5,
+    "ytick.labelsize": 7.5,
+    "xtick.direction": "out",
+    "ytick.direction": "out",
+    "xtick.major.width": 0.8,
+    "ytick.major.width": 0.8,
+    "xtick.major.size": 3,
+    "ytick.major.size": 3,
+    "legend.fontsize": 7,
+    "svg.fonttype": "none",  # keep text editable in Illustrator/Inkscape
+    "pdf.fonttype": 42,
+}
 
 
 def _bracket_pairs(metric: dict, labels: list[str]) -> list[tuple[int, int, float]]:
@@ -285,23 +456,53 @@ _GROUP_COLORS = [
 ]
 
 
-def plot_group_comparison(comparison: dict, out_path: str, max_metrics: int = 12) -> None:
-    """One GraphPad-Prism-style panel per metric, across all groups.
+def _figure_caption(comparison: dict, error_bar: str, p_style: str) -> str:
+    """One-line methods caption for the figure footer, in the wording a
+    figure legend would use."""
+    labels = comparison["labels"]
+    n_videos = comparison.get("n_videos") or []
+    n_text = ", ".join(f"{lab} n = {n}" for lab, n in zip(labels, n_videos)) if n_videos else ""
+    tests = {m["test"] for m in comparison["metrics"]}
+    omnibus = " / ".join(_TEST_LABELS.get(t, t) for t in sorted(tests)) or "—"
+    posthoc_label = comparison.get("posthoc_label", "post-hoc")
+    if len(labels) == 2:
+        stats = f"{omnibus}"
+        bracket = "Bracket shows the p-value"
+    else:
+        stats = f"{omnibus}, {posthoc_label}"
+        bracket = f"Brackets: each group vs. {labels[0]}"
+    if p_style == "stars":
+        bracket += "; *p < 0.05, **p < 0.01, ***p < 0.001, ****p < 0.0001, ns not significant"
+    parts = [f"Mean ± {error_bar.upper()}; dots are individual videos", stats, bracket]
+    if n_text:
+        parts.append(n_text)
+    return ". ".join(parts) + "."
 
-    Each panel: bar = group mean, error bar = SEM, overlaid dots = each
-    video's value, and stacked significance brackets with p-values for
-    each group vs. the first (control/reference) group — the layout of a
-    typical dose-response figure. Panels are ordered most-significant-first
-    (comparison["metrics"] is already sorted that way) and capped at
-    max_metrics so a summary with many fields doesn't produce an
-    unreadably large grid. Works for any number of groups (2+) — the
-    omnibus test in each title is Mann-Whitney U for exactly 2 groups or
-    Kruskal-Wallis for 3+, per compare_groups().
+
+def plot_group_comparison(comparison: dict, out_path: str, max_metrics: int = 12) -> None:
+    """Publication-style multi-panel figure, one panel per metric.
+
+    Each panel: bar = group mean, thin capped error bar = SEM or SD
+    (comparison["error_bar"]), overlaid dots = each video's value, and
+    stacked significance brackets for each group vs. the first
+    (control/reference) group — the layout of a typical dose-response or
+    treatment figure. Panels get letters (A, B, C, ...), a clean metric
+    title with the unit on the y-axis, and a small gray subtitle with the
+    omnibus test p-value; the methods text goes in one footer caption
+    instead of every title. Brackets show exact p-values or asterisks
+    (comparison["p_style"] = "value" | "stars"). Saved at 300 dpi, and as
+    an editable-text SVG next to it when out_path ends in .png.
+
+    Panels are ordered most-significant-first (comparison["metrics"] is
+    already sorted that way) and capped at max_metrics.
     """
     metrics = comparison["metrics"][:max_metrics]
     error_bar = comparison.get("error_bar", "sem")
     if error_bar not in ("sem", "sd"):
         error_bar = "sem"
+    p_style = comparison.get("p_style", "value")
+    if p_style not in ("value", "stars"):
+        p_style = "value"
 
     if not metrics:
         fig, ax = plt.subplots(figsize=(4, 2))
@@ -311,10 +512,17 @@ def plot_group_comparison(comparison: dict, out_path: str, max_metrics: int = 12
         plt.close(fig)
         return
 
+    with plt.rc_context(_PUB_RC):
+        _draw_group_comparison(comparison, metrics, error_bar, p_style, out_path)
+
+
+def _draw_group_comparison(comparison: dict, metrics: list, error_bar: str, p_style: str, out_path: str) -> None:
     ncols = min(3, len(metrics))
     nrows = int(np.ceil(len(metrics) / ncols))
-    fig, axes = plt.subplots(nrows, ncols, figsize=(4.4 * ncols, 3.9 * nrows), squeeze=False)
+    # ~2.3 in per panel: three panels fit a two-column journal figure (~7 in).
+    fig, axes = plt.subplots(nrows, ncols, figsize=(2.45 * ncols, 2.55 * nrows), squeeze=False)
     rng = np.random.default_rng(0)
+    letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
     for idx, m in enumerate(metrics):
         ax = axes[idx // ncols][idx % ncols]
@@ -323,36 +531,30 @@ def plot_group_comparison(comparison: dict, out_path: str, max_metrics: int = 12
         n_groups = len(groups)
         xs = np.arange(n_groups)
         means = [g["mean"] for g in groups]
-        # Error bar = SEM or SD per comparison["error_bar"]: SEM is the usual
-        # choice in cardiomyocyte/organoid figures, SD what the lab's own
-        # manuscripts report ("mean ± SD") — both are valid, they must just
-        # be labeled, so the y-axis says which one this is.
         if error_bar == "sd":
             errs = [g["std"] for g in groups]
         else:
             errs = [g.get("sem", g["std"] / np.sqrt(g["n"]) if g["n"] > 1 else 0.0) for g in groups]
-        sems = errs
         colors = [_GROUP_COLORS[i % len(_GROUP_COLORS)] for i in range(n_groups)]
 
-        ax.bar(xs, means, width=0.62, color=colors, alpha=0.9, edgecolor="black", linewidth=0.8, zorder=2)
-        ax.errorbar(xs, means, yerr=errs, fmt="none", ecolor="black", elinewidth=1.2, capsize=4, zorder=4)
+        ax.bar(xs, means, width=0.6, color=colors, alpha=0.85, edgecolor="black", linewidth=0.7, zorder=2)
+        ax.errorbar(xs, means, yerr=errs, fmt="none", ecolor="black", elinewidth=0.8, capsize=2.5, capthick=0.8, zorder=4)
 
         all_values: list[float] = []
         for gi, g in enumerate(groups):
-            jitter = rng.normal(0, 0.06, len(g["values"]))
+            vals = np.asarray(g["values"], dtype=float)
+            jitter = rng.uniform(-0.14, 0.14, len(vals)) if len(vals) > 1 else np.zeros(len(vals))
             ax.scatter(
-                xs[gi] + jitter, g["values"], color=colors[gi], edgecolor="black", linewidth=0.6, s=30, zorder=5
+                xs[gi] + jitter, vals, color="white", edgecolor="black", linewidth=0.6, s=14, zorder=5
             )
-            all_values.extend(g["values"])
+            all_values.extend(vals.tolist())
 
-        data_max = max(max(all_values, default=0.0), max(mu + s for mu, s in zip(means, sems)))
+        data_max = max(max(all_values, default=0.0), max(mu + e for mu, e in zip(means, errs)))
         data_min = min(min(all_values, default=0.0), 0.0)
         span = (data_max - data_min) or 1.0
 
-        # Stacked brackets above the data, shortest lowest — same look as
-        # Prism's "compare to control" annotations.
-        height = data_max + 0.07 * span
-        step = 0.12 * span
+        height = data_max + 0.08 * span
+        step = 0.13 * span if p_style == "value" else 0.11 * span
         tick = 0.025 * span
         pairs = _bracket_pairs(m, labels)
         for i, j, p in pairs:
@@ -360,48 +562,53 @@ def plot_group_comparison(comparison: dict, out_path: str, max_metrics: int = 12
                 [xs[i], xs[i], xs[j], xs[j]],
                 [height - tick, height, height, height - tick],
                 color="black",
-                linewidth=1.0,
+                linewidth=0.7,
                 zorder=6,
+                solid_capstyle="butt",
             )
-            ax.text((xs[i] + xs[j]) / 2, height + 0.012 * span, _format_p(p), ha="center", va="bottom", fontsize=7.5)
+            text = _format_p(p, p_style)
+            ax.text(
+                (xs[i] + xs[j]) / 2,
+                height + (0.005 if p_style == "stars" else 0.012) * span,
+                text,
+                ha="center",
+                va="bottom",
+                fontsize=8 if p_style == "stars" else 6.5,
+            )
             height += step
-        top = height + 0.03 * span if pairs else data_max + 0.12 * span
+        top = height + 0.02 * span if pairs else data_max + 0.12 * span
         ax.set_ylim(data_min - 0.04 * span if data_min < 0 else 0.0, top)
 
         ax.set_xticks(xs)
-        ax.set_xticklabels(
-            labels,
-            fontsize=8,
-            rotation=30 if n_groups > 3 else 0,
-            ha="right" if n_groups > 3 else "center",
-        )
+        long_labels = n_groups > 3 or max(len(lab) for lab in labels) > 8
+        ax.set_xticklabels(labels, rotation=35 if long_labels else 0, ha="right" if long_labels else "center")
         ax.set_xlim(-0.6, n_groups - 0.4)
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
-        ax.set_ylabel(f"mean ± {error_bar.upper()}", fontsize=8)
+        ax.tick_params(axis="x", length=0)
+        ax.yaxis.set_major_locator(plt.MaxNLocator(5))
 
+        title, unit = _metric_display(m["metric"], comparison)
+        ax.set_ylabel(_AXIS_LABELS.get(unit, unit) if unit else title)
+        ax.set_title(title, fontweight="bold", pad=14)
         test_label = _TEST_LABELS.get(m["test"], m["test"])
-        title_extra = ""
+        subtitle = f"{test_label} {_format_p(m['p_value'])}"
         lmm_pairwise = m.get("lmm_pairwise")
         if lmm_pairwise:
             n_sig_lmm = sum(1 for pw in lmm_pairwise if pw["p_value"] < 0.05)
-            title_extra = f"\nLMM: {n_sig_lmm}/{len(lmm_pairwise)} pairs sig ({m.get('lmm_n_clusters')} clusters)"
-        ax.set_title(f"{m['metric']}\n{test_label} {_format_p(m['p_value'])}{title_extra}", fontsize=9)
+            subtitle += f"; LMM {n_sig_lmm}/{len(lmm_pairwise)} pairs p < 0.05"
+        ax.text(0.5, 1.01, subtitle, transform=ax.transAxes, ha="center", va="bottom", fontsize=6.5, color="#666666")
+        ax.text(-0.28, 1.13, letters[idx % 26], transform=ax.transAxes, fontsize=11, fontweight="bold", va="bottom")
 
     for idx in range(len(metrics), nrows * ncols):
         axes[idx // ncols][idx % ncols].axis("off")
 
-    n_groups_total = len(comparison["labels"])
-    posthoc_label = comparison.get("posthoc_label", "post-hoc")
-    bracket_note = (
-        f"Brackets: {posthoc_label} p-value"
-        if n_groups_total == 2
-        else f"Brackets: each group vs. '{comparison['labels'][0]}', {posthoc_label} p"
-    )
-    fig.text(0.5, 0.005, bracket_note, ha="center", va="bottom", fontsize=8, color="#444444")
-
-    fig.tight_layout(rect=(0, 0.03, 1, 1))
-    fig.savefig(out_path, dpi=150)
+    caption = _figure_caption(comparison, error_bar, p_style)
+    fig.tight_layout(rect=(0, 0.035, 1, 1), h_pad=1.6, w_pad=1.2)
+    fig.text(0.01, 0.006, caption, ha="left", va="bottom", fontsize=6.5, color="#444444", wrap=True)
+    fig.savefig(out_path, dpi=300)
+    if out_path.lower().endswith(".png"):
+        fig.savefig(out_path[:-4] + ".svg")
     plt.close(fig)
 
 
