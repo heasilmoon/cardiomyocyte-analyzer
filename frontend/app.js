@@ -489,6 +489,8 @@ function renderComparisonResults(container, data) {
       <tbody>${rows}</tbody>
     </table>
     <div class="links">
+      ${urls.plot ? `<a href="${API_BASE}${urls.plot}" download>그림 PNG (300 dpi)</a>` : ""}
+      ${urls.plot_svg ? `<a href="${API_BASE}${urls.plot_svg}" download>그림 SVG (벡터, Illustrator/Inkscape 편집용)</a>` : ""}
       ${urls.csv ? `<a href="${API_BASE}${urls.csv}" download>CSV 다운로드</a>` : ""}
       ${urls.summary ? `<a href="${API_BASE}${urls.summary}" download>요약 JSON 다운로드</a>` : ""}
     </div>

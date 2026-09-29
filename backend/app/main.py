@@ -181,6 +181,7 @@ def _urls(result_id: str, result_dir: Path) -> dict:
         name: f"/results/{result_id}/{path.name}"
         for name, path in {
             "plot": result_dir / "plot.png",
+            "plot_svg": result_dir / "plot.svg",
             "csv": result_dir / "data.csv",
             "summary": result_dir / "summary.json",
         }.items()
@@ -517,8 +518,22 @@ async def analyze_compare_endpoint(request: Request):
     if len(groups) < 2:
         raise HTTPException(status_code=400, detail="Need at least 2 groups, each with at least one video file")
 
+    p_style = str(form.get("p_style") or "value").lower()
+    if p_style not in ("value", "stars"):
+        raise HTTPException(status_code=400, detail="p_style must be 'value' or 'stars'")
+
     comparison = compare_groups(groups, test_family=test_family)
     comparison["error_bar"] = error_bar
+    comparison["p_style"] = p_style
+    # Units that depend on the analysis settings (optical_flow speeds are
+    # µm/s only when a pixel size was given) — for the figure's axis labels.
+    units = {}
+    for g in groups:
+        for s in g.summaries:
+            for key in ("speed_units", "area_units"):
+                if s.get(key) and key not in units:
+                    units[key] = s[key]
+    comparison["units"] = units
 
     result_id, result_dir = _new_result_dir()
     combined_rows = [{**s, "group": g.label} for g in groups for s in g.summaries]
