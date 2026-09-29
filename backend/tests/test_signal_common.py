@@ -76,7 +76,7 @@ def test_despike_removes_periodic_keyframe_comb_but_keeps_beats():
     assert n_spikes >= 90  # one run per keyframe (100 in 50 s)
     # Beats survive, comb is gone.
     assert cleaned[int(20 * fps)] > 1.5 and cleaned[int(36 * fps)] > 1.5
-    comb = np.arange(0, t.size, 30)
+    comb = np.arange(30, t.size - 30, 30)  # skip the boundary samples, which the median cannot judge
     comb = comb[(np.abs(t[comb] - 20.0) > 1.0) & (np.abs(t[comb] - 36.0) > 1.0)]  # skip the real beats
     assert np.max(np.abs(cleaned[comb] - 0.3)) < 0.15
 
