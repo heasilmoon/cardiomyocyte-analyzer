@@ -267,6 +267,8 @@ def analyze_calcium(
 
     summary = {
         "n_transients": int(len(peaks)),
+        "fps": float(fps),
+        "n_frames": int(n),
         "duration_s": float(n / fps),
         "background_method": background_method,
         "mean_frequency_per_min": float(60.0 / ipis.mean()) if len(ipis) else None,

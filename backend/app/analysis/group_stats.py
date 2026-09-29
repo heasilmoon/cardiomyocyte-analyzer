@@ -66,6 +66,12 @@ _EXCLUDED_METRICS = {
     "estimated_period_s",
     "min_bpm_gap_used",
     "smoothing_window_s",
+    # Recording / analysis settings, not biology.
+    "fps",
+    "um_per_px",
+    "farneback_winsize",
+    "wave_threshold_frac",
+    "baseline_speed",
 }
 
 

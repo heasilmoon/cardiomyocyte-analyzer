@@ -25,6 +25,8 @@ function fieldLabel(key) {
     smoothing_window_s: "스무딩 윈도우 (s)",
     min_bpm_gap_used: "적용된 최소 피크 간격 (bpm 상한)",
     n_beats: "박동 수",
+    fps: "프레임 속도 (fps, 초당 프레임 수)",
+    n_frames: "프레임 수",
     duration_s: "영상 길이 (s)",
     mean_bpm: "평균 박동수 (BPM)",
     mean_inter_beat_interval_s: "평균 박동 간격 (s)",
