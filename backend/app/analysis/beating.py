@@ -286,7 +286,11 @@ def _finish_optical_flow(
         "fps": float(fps),
         "n_frames": int(frames.shape[0]),
         "duration_s": float(len(raw_signal) / fps),
-        "mean_bpm": float(60.0 / ibis.mean()) if len(ibis) else None,
+        # Beating rate: from the mean inter-beat interval when there are 2+
+        # beats; otherwise from the count over the recording (0 for a
+        # non-beating video) so a near-arrest condition plots as ~0 BPM
+        # instead of vanishing from group comparisons.
+        "mean_bpm": float(60.0 / ibis.mean()) if len(ibis) else float(60.0 * len(beats_df) * fps / max(len(raw_signal), 1)),
         "mean_inter_beat_interval_s": float(ibis.mean()) if len(ibis) else None,
         "ibi_std_s": float(ibis.std()) if len(ibis) else None,
         "ibi_cv_percent": float(100.0 * ibis.std() / ibis.mean()) if len(ibis) and ibis.mean() else None,
@@ -485,7 +489,8 @@ def analyze_beating(
         "fps": float(fps),
         "n_frames": int(frames.shape[0]),
         "duration_s": float(n / fps),
-        "mean_bpm": float(60.0 / ibis.mean()) if len(ibis) else None,
+        # See _finish_optical_flow: count-based fallback for 0-1 beats.
+        "mean_bpm": float(60.0 / ibis.mean()) if len(ibis) else float(60.0 * len(peaks) * fps / max(n, 1)),
         "mean_inter_beat_interval_s": float(ibis.mean()) if len(ibis) else None,
         "ibi_std_s": float(ibis.std()) if len(ibis) else None,
         "ibi_cv_percent": float(100.0 * ibis.std() / ibis.mean()) if len(ibis) and ibis.mean() else None,

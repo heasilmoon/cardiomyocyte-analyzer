@@ -126,7 +126,7 @@ def test_analyze_beating_optical_flow_handles_static_video():
     frames = np.full((40, 32, 32), 100, dtype=np.uint8)
     result = analyze_beating(frames, fps, signal_mode="optical_flow")
     assert result.summary["n_beats"] == 0
-    assert result.summary["mean_bpm"] is None
+    assert result.summary["mean_bpm"] == 0.0  # count-based fallback: no beats -> 0 BPM
     json.dumps(result.summary, allow_nan=False)
 
 
