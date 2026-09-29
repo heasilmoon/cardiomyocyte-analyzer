@@ -536,6 +536,23 @@ function buildComparisonTable(comparison, errorBar, errorBarLabel, pStyle) {
 
 function renderComparisonResults(container, data) {
   const { comparison, urls } = data;
+  const panels = data.panels || [];
+  const panelGrid = panels.length
+    ? `<h4 class="compare-category-title">지표별 개별 그림
+        <span class="compare-category-sub">(패널 글자 없음 · 클릭하면 크게, 아래 링크로 PNG/SVG 저장)</span></h4>
+      <div class="panel-grid">
+        ${panels
+          .map(
+            (p) => `<figure class="panel-card">
+              <a href="${API_BASE}${p.png}" target="_blank" rel="noopener"><img src="${API_BASE}${p.png}" alt="${p.title}" /></a>
+              <figcaption>${p.title}
+                <span><a href="${API_BASE}${p.png}" download>PNG</a> · <a href="${API_BASE}${p.svg}" download>SVG</a></span>
+              </figcaption>
+            </figure>`
+          )
+          .join("")}
+      </div>`
+    : "";
   const errorBar = comparison.error_bar === "sd" ? "sd" : "sem";
   const errorBarLabel = errorBar === "sd" ? "표준편차(SD)" : "SEM";
   const pStyle = comparison.p_style || "nejm";
@@ -586,7 +603,8 @@ function renderComparisonResults(container, data) {
   }
 
   container.innerHTML = `
-    ${urls.plot ? `<img src="${API_BASE}${urls.plot}" alt="comparison plot" />` : ""}
+    ${urls.plot ? `<h4 class="compare-category-title">전체 그림 <span class="compare-category-sub">(패널 A, B, C… 순서 있음)</span></h4><img src="${API_BASE}${urls.plot}" alt="comparison plot" />` : ""}
+    ${panelGrid}
     <p class="roi-applied-note">그룹: ${groupHeaders} &middot; 검정: ${testFamilyText}${comparison.layout === "clustered" ? " (묶음 안에서 비교)" : ""} &middot; 오차막대: ${errorBarLabel}</p>
     ${tables}
     <div class="links">

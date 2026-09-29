@@ -209,3 +209,32 @@ table.compare-table th {
   color: var(--muted);
   margin-left: 0.4rem;
 }
+
+/* Individual per-metric panels under the combined comparison figure */
+.panel-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.8rem;
+  margin: 0.5rem 0 1rem;
+}
+.panel-card {
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.4rem;
+  background: #fff;
+}
+.panel-card img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.panel-card figcaption {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-top: 0.3rem;
+}

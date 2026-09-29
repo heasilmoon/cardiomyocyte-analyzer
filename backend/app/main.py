@@ -658,10 +658,19 @@ async def analyze_compare_endpoint(request: Request):
     ]
     pd.DataFrame(combined_rows).to_csv(result_dir / "data.csv", index=False)
     (result_dir / "summary.json").write_text(json.dumps(comparison, indent=2))
-    plotting.plot_group_comparison(comparison, str(result_dir / "plot.png"))
+    panel_files = plotting.plot_group_comparison(comparison, str(result_dir / "plot.png"), panels_dir=str(result_dir))
     result_storage.upload_result(result_id, result_dir, "compare", comparison)
 
-    return {"result_id": result_id, "comparison": comparison, "urls": _urls(result_id, result_dir)}
+    panels = [
+        {
+            "metric": p["metric"],
+            "title": p["title"],
+            "png": f"/results/{result_id}/{p['png']}",
+            "svg": f"/results/{result_id}/{p['svg']}",
+        }
+        for p in panel_files
+    ]
+    return {"result_id": result_id, "comparison": comparison, "urls": _urls(result_id, result_dir), "panels": panels}
 
 
 @app.post("/api/validate/agreement")
