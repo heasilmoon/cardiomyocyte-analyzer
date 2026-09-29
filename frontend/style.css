@@ -196,3 +196,16 @@ table.compare-table th {
   color: var(--muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
+
+/* Per-category headings for grouped (two-factor) comparison tables */
+.compare-category-title {
+  margin: 1.2rem 0 0.4rem;
+  font-size: 1rem;
+  color: var(--text);
+}
+.compare-category-sub {
+  font-weight: normal;
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-left: 0.4rem;
+}

@@ -24,7 +24,7 @@ from app.analysis import plotting
 from app.analysis.beating import analyze_beating
 from app.analysis.calcium import analyze_calcium
 from app.analysis.colocalization import analyze_colocalization
-from app.analysis.group_stats import GroupInput, compare_groups
+from app.analysis.group_stats import GroupInput, compare_grouped, compare_groups
 from app.analysis.morphology import analyze_morphology_2d, analyze_morphology_3d
 from app.analysis.validation_stats import compute_agreement
 from app.config import FRONTEND_DIR, MAX_FRAME_SIDE, MAX_FRAMES, MAX_UPLOAD_BYTES, RESULTS_DIR, UPLOADS_DIR
@@ -578,6 +578,7 @@ async def analyze_compare_endpoint(request: Request):
 
     groups: list[GroupInput] = []
     group_colors: list[str | None] = []
+    group_categories: list[str] = []
     for idx in group_indices:
         files = [
             f for f in form.getlist(f"group_{idx}_files") if isinstance(f, StarletteUploadFile) and f.filename
@@ -589,6 +590,7 @@ async def analyze_compare_endpoint(request: Request):
         if color_raw and not re.fullmatch(r"#[0-9a-fA-F]{6}", color_raw):
             raise HTTPException(status_code=400, detail=f"group_{idx}_color must be a hex color like #ec4b81")
         group_colors.append(color_raw.lower() or None)
+        group_categories.append(str(form.get(f"group_{idx}_category") or "").strip())
         batches_raw = form.get(f"group_{idx}_batches")
         clusters = (
             _parse_batch_labels(str(batches_raw), len(files), f"group_{idx}_batches")
@@ -604,10 +606,26 @@ async def analyze_compare_endpoint(request: Request):
     p_style = str(form.get("p_style") or "nejm").lower()
     if p_style not in ("nejm", "value", "stars"):
         raise HTTPException(status_code=400, detail="p_style must be 'nejm', 'value' or 'stars'")
+    bracket_style = str(form.get("bracket_style") or "line").lower()
+    if bracket_style not in ("line", "bracket"):
+        raise HTTPException(status_code=400, detail="bracket_style must be 'line' or 'bracket'")
 
-    comparison = compare_groups(groups, test_family=test_family)
+    clustered = any(group_categories)
+    if clustered:
+        # Groups without a category form their own cluster named after the label.
+        categories = [c or g.label for c, g in zip(group_categories, groups)]
+        comparison = compare_grouped(groups, categories, test_family=test_family)
+        condition_colors: dict[str, str] = {}
+        for g, col in zip(groups, group_colors):
+            if col and g.label not in condition_colors:
+                condition_colors[g.label] = col
+        comparison["condition_colors"] = condition_colors
+        comparison["group_categories"] = categories
+    else:
+        comparison = compare_groups(groups, test_family=test_family)
     comparison["error_bar"] = error_bar
     comparison["p_style"] = p_style
+    comparison["bracket_style"] = bracket_style
     comparison["group_colors"] = group_colors
     # Units that depend on the analysis settings (optical_flow speeds are
     # µm/s only when a pixel size was given) — for the figure's axis labels.
@@ -620,7 +638,11 @@ async def analyze_compare_endpoint(request: Request):
     comparison["units"] = units
 
     result_id, result_dir = _new_result_dir()
-    combined_rows = [{**s, "group": g.label} for g in groups for s in g.summaries]
+    combined_rows = [
+        {**s, "group": g.label, **({"category": c} if clustered else {})}
+        for g, c in zip(groups, (comparison.get("group_categories") or [None] * len(groups)))
+        for s in g.summaries
+    ]
     pd.DataFrame(combined_rows).to_csv(result_dir / "data.csv", index=False)
     (result_dir / "summary.json").write_text(json.dumps(comparison, indent=2))
     plotting.plot_group_comparison(comparison, str(result_dir / "plot.png"))

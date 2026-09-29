@@ -545,11 +545,37 @@ def plot_group_comparison(comparison: dict, out_path: str, max_metrics: int = 12
         plt.close(fig)
         return
 
+    bracket_style = comparison.get("bracket_style", "line")
+    if bracket_style not in ("line", "bracket"):
+        bracket_style = "line"
+
     with plt.rc_context(_PUB_RC):
-        _draw_group_comparison(comparison, metrics, error_bar, p_style, out_path)
+        if comparison.get("layout") == "clustered":
+            _draw_clustered_comparison(comparison, error_bar, p_style, bracket_style, out_path, max_metrics)
+        else:
+            _draw_group_comparison(comparison, metrics, error_bar, p_style, out_path, bracket_style)
 
 
-def _draw_group_comparison(comparison: dict, metrics: list, error_bar: str, p_style: str, out_path: str) -> None:
+def _sig_line(ax, x0: float, x1: float, y: float, tick: float, text: str, p_style: str, span: float) -> None:
+    """One significance annotation: a flat line (Prism 'line' style) or a
+    bracket with end ticks, with the p text centred above it."""
+    if tick > 0:
+        ax.plot([x0, x0, x1, x1], [y - tick, y, y, y - tick], color="black", linewidth=0.7, zorder=6, solid_capstyle="butt")
+    else:
+        ax.plot([x0, x1], [y, y], color="black", linewidth=0.8, zorder=6, solid_capstyle="butt")
+    ax.text(
+        (x0 + x1) / 2,
+        y + (0.005 if p_style == "stars" else 0.012) * span,
+        text,
+        ha="center",
+        va="bottom",
+        fontsize=8 if p_style == "stars" else 6.5,
+    )
+
+
+def _draw_group_comparison(
+    comparison: dict, metrics: list, error_bar: str, p_style: str, out_path: str, bracket_style: str = "line"
+) -> None:
     ncols = min(3, len(metrics))
     nrows = int(np.ceil(len(metrics) / ncols))
     # ~2.3 in per panel: three panels fit a two-column journal figure (~7 in).
@@ -588,26 +614,10 @@ def _draw_group_comparison(comparison: dict, metrics: list, error_bar: str, p_st
 
         height = data_max + 0.08 * span
         step = 0.11 * span if p_style == "stars" else 0.13 * span
-        tick = 0.025 * span
+        tick = 0.025 * span if bracket_style == "bracket" else 0.0
         pairs = _bracket_pairs(m, labels)
         for i, j, p in pairs:
-            ax.plot(
-                [xs[i], xs[i], xs[j], xs[j]],
-                [height - tick, height, height, height - tick],
-                color="black",
-                linewidth=0.7,
-                zorder=6,
-                solid_capstyle="butt",
-            )
-            text = _format_p(p, p_style)
-            ax.text(
-                (xs[i] + xs[j]) / 2,
-                height + (0.005 if p_style == "stars" else 0.012) * span,
-                text,
-                ha="center",
-                va="bottom",
-                fontsize=8 if p_style == "stars" else 6.5,
-            )
+            _sig_line(ax, xs[i], xs[j], height, tick, _format_p(p, p_style), p_style, span)
             height += step
         top = height + 0.02 * span if pairs else data_max + 0.12 * span
         ax.set_ylim(data_min - 0.04 * span if data_min < 0 else 0.0, top)
@@ -638,6 +648,129 @@ def _draw_group_comparison(comparison: dict, metrics: list, error_bar: str, p_st
 
     caption = _figure_caption(comparison, error_bar, p_style)
     fig.tight_layout(rect=(0, 0.035, 1, 1), h_pad=1.6, w_pad=1.2)
+    fig.text(0.01, 0.006, caption, ha="left", va="bottom", fontsize=6.5, color="#444444", wrap=True)
+    fig.savefig(out_path, dpi=300)
+    if out_path.lower().endswith(".png"):
+        fig.savefig(out_path[:-4] + ".svg")
+    plt.close(fig)
+
+
+def _draw_clustered_comparison(
+    comparison: dict, error_bar: str, p_style: str, bracket_style: str, out_path: str, max_metrics: int
+) -> None:
+    """Grouped-bar layout: x clusters = categories (e.g. cell lines), bars
+    within a cluster = conditions (e.g. Vehicle / treatment) with one colour
+    per condition and a shared legend; significance lines compare the
+    conditions within each cluster (vs. the first condition)."""
+    import matplotlib.patches as mpatches
+
+    categories: list[str] = comparison["categories"]
+    conditions: list[str] = comparison["conditions"]
+    per_cat = {pc["category"]: pc["comparison"] for pc in comparison["per_category"]}
+    metric_keys: list[str] = comparison["metric_keys"][:max_metrics]
+    n_cat, n_cond = len(categories), len(conditions)
+    cond_colors = comparison.get("condition_colors") or {}
+    colors = {
+        c: (cond_colors.get(c) if isinstance(cond_colors.get(c), str) else _GROUP_COLORS[(i + 1) % len(_GROUP_COLORS)])
+        for i, c in enumerate(conditions)
+    }
+    bw = 0.8 / n_cond
+    rng = np.random.default_rng(0)
+    letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+    n_bars = n_cat * n_cond
+    # Wider clusters get fewer panels per row so the figure stays ~7-8 in wide.
+    ncols = 3 if n_bars <= 6 else (2 if n_bars <= 12 else 1)
+    ncols = min(ncols, len(metric_keys))
+    nrows = int(np.ceil(len(metric_keys) / ncols))
+    panel_w = float(np.clip(0.8 + 0.36 * n_bars, 2.45, 7.5))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(panel_w * ncols, 2.7 * nrows), squeeze=False)
+    letter_x = -0.28 * (2.45 / panel_w)
+
+    def bar_x(ci: int, ki: int) -> float:
+        return ci + (ki - (n_cond - 1) / 2.0) * bw
+
+    for idx, key in enumerate(metric_keys):
+        ax = axes[idx // ncols][idx % ncols]
+        all_values: list[float] = []
+        tops: list[float] = []
+        cluster_max: dict[int, float] = {}
+        for ci, cat in enumerate(categories):
+            comp = per_cat[cat]
+            entry = next((m for m in comp["metrics"] if m["metric"] == key), None)
+            if entry is None:
+                continue
+            for grp in entry["groups"]:
+                if grp["label"] not in conditions:
+                    continue
+                ki = conditions.index(grp["label"])
+                x = bar_x(ci, ki)
+                err = grp["std"] if error_bar == "sd" else grp.get("sem", 0.0)
+                ax.bar(x, grp["mean"], width=bw * 0.92, color=colors[grp["label"]], alpha=0.85, edgecolor="black", linewidth=0.7, zorder=2)
+                ax.errorbar(x, grp["mean"], yerr=err, fmt="none", ecolor="black", elinewidth=0.8, capsize=2.0, capthick=0.8, zorder=4)
+                vals = np.asarray(grp["values"], dtype=float)
+                jitter = rng.uniform(-0.3 * bw, 0.3 * bw, len(vals)) if len(vals) > 1 else np.zeros(len(vals))
+                ax.scatter(x + jitter, vals, color="white", edgecolor="black", linewidth=0.5, s=10, zorder=5)
+                all_values.extend(vals.tolist())
+                top = max(grp["mean"] + err, float(vals.max()) if len(vals) else grp["mean"])
+                tops.append(top)
+                cluster_max[ci] = max(cluster_max.get(ci, 0.0), top)
+
+        data_max = max(tops, default=1.0)
+        data_min = min(min(all_values, default=0.0), 0.0)
+        span = (data_max - data_min) or 1.0
+        step = 0.11 * span if p_style == "stars" else 0.13 * span
+        tick = 0.025 * span if bracket_style == "bracket" else 0.0
+        highest = data_max
+        for ci, cat in enumerate(categories):
+            comp = per_cat[cat]
+            entry = next((m for m in comp["metrics"] if m["metric"] == key), None)
+            if entry is None or entry.get("test") is None:
+                continue
+            labels_in_cat = [g["label"] for g in entry["groups"]]
+            height = cluster_max.get(ci, data_max) + 0.08 * span
+            for i, j, p in _bracket_pairs(entry, labels_in_cat):
+                xi = bar_x(ci, conditions.index(labels_in_cat[i]))
+                xj = bar_x(ci, conditions.index(labels_in_cat[j]))
+                _sig_line(ax, xi, xj, height, tick, _format_p(p, p_style), p_style, span)
+                height += step
+            highest = max(highest, height)
+        ax.set_ylim(data_min - 0.04 * span if data_min < 0 else 0.0, highest + 0.06 * span)
+
+        ax.set_xticks(np.arange(n_cat))
+        long_labels = n_cat > 4 or max(len(c) for c in categories) > 8
+        ax.set_xticklabels(categories, rotation=35 if long_labels else 0, ha="right" if long_labels else "center")
+        ax.set_xlim(-0.6, n_cat - 0.4)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.tick_params(axis="x", length=0)
+        ax.yaxis.set_major_locator(plt.MaxNLocator(5))
+
+        title, unit = _metric_display(key, comparison)
+        ax.set_ylabel(_AXIS_LABELS.get(unit, unit) if unit else title)
+        ax.set_title(title, fontweight="bold", pad=6)
+        ax.text(letter_x, 1.06, letters[idx % 26], transform=ax.transAxes, fontsize=11, fontweight="bold", va="bottom")
+
+    for idx in range(len(metric_keys), nrows * ncols):
+        axes[idx // ncols][idx % ncols].axis("off")
+
+    handles = [mpatches.Patch(facecolor=colors[c], edgecolor="black", linewidth=0.6, label=c) for c in conditions]
+    fig.legend(handles=handles, loc="upper center", ncol=min(n_cond, 6), frameon=False, fontsize=8, bbox_to_anchor=(0.5, 0.995))
+
+    posthoc_label = comparison.get("posthoc_label", "post-hoc")
+    ref = conditions[0]
+    parts = [f"Mean ± {error_bar.upper()}; dots are individual videos", f"{posthoc_label} within each category, vs. {ref}"]
+    if p_style == "stars":
+        parts.append("*p < 0.05, **p < 0.01, ***p < 0.001, ****p < 0.0001, ns not significant")
+    elif p_style == "nejm":
+        parts.append("*p < 0.05, **p < 0.01, ***p < 0.001, ns not significant")
+    n_videos = comparison.get("n_videos") or []
+    if n_videos and len(set(n_videos)) == 1:
+        parts.append(f"n = {n_videos[0]} videos per bar")
+    elif n_videos:
+        parts.append(", ".join(f"{lab} n = {n}" for lab, n in zip(comparison["labels"], n_videos)))
+    caption = ". ".join(parts) + "."
+    fig.tight_layout(rect=(0, 0.035, 1, 0.95), h_pad=1.6, w_pad=1.2)
     fig.text(0.01, 0.006, caption, ha="left", va="bottom", fontsize=6.5, color="#444444", wrap=True)
     fig.savefig(out_path, dpi=300)
     if out_path.lower().endswith(".png"):

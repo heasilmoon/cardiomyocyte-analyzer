@@ -281,7 +281,17 @@
               <option value="stars">별표만 (*, **, ***, ****, ns)</option>
             </select>
           </div>
+          <div class="field">
+            <label>유의성 표시선 모양</label>
+            <select name="bracket_style">
+              <option value="line">일자선 (Prism 기본)</option>
+              <option value="bracket">ㄷ자 브래킷</option>
+            </select>
+          </div>
         </div>
+        <p class="roi-hint">2요인 실험(예: 세포주 × 처치)이면 그룹마다 "묶음"에 세포주(DC1, DC2 …)를, "그룹 라벨"에
+        조건(Vehicle, UT H …)을 넣으세요. 같은 묶음의 막대가 나란히 그려지고(범례 = 조건), 통계는 묶음 안에서
+        첫 번째 조건 대비로 계산됩니다. 묶음을 비우면 지금처럼 그룹을 한 줄로 비교합니다.</p>
         <div id="compare-groups"></div>
         <div class="form-row">
           <button type="button" class="roi-reset" id="compare-add-group">+ 그룹 추가</button>
