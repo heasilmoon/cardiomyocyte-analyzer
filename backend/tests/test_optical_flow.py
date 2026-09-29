@@ -51,8 +51,8 @@ def test_pair_strokes_pairs_nearby_tall_peaks_and_ignores_noise_bumps():
     speed = np.zeros(300)
     # Beat 1: contraction at 20 (height 10), relaxation at 50 (height 6).
     # Beat 2: relaxation is the taller stroke: contraction at 120 (4), relaxation at 150 (10).
-    # Beat 3: contraction at 220 (10) with only a tiny noise bump at 260 (1).
-    for i, h in [(20, 10), (50, 6), (120, 4), (150, 10), (220, 10), (260, 1)]:
+    # Beat 3: contraction at 220 (10) with only a tiny noise bump at 260 (0.5, i.e. 5 %).
+    for i, h in [(20, 10), (50, 6), (120, 4), (150, 10), (220, 10), (260, 0.5)]:
         speed[i] = h
     anchors = np.array([20, 150, 220])
     strokes = np.array([20, 50, 120, 150, 220, 260])
