@@ -432,19 +432,19 @@ if (compareAnalysisType) {
   syncMorphologyModeVisibility();
 }
 
-function renderComparisonResults(container, data) {
-  const { comparison, urls } = data;
+const COMPARE_TEST_LABELS = {
+  mann_whitney_u: "Mann-Whitney U",
+  kruskal_wallis: "Kruskal-Wallis",
+  welch_t: "Welch's t-test",
+  anova: "One-way ANOVA",
+};
+
+// One results table for a compare_groups-shaped object (the whole
+// comparison, or one category of a clustered comparison).
+function buildComparisonTable(comparison, errorBar, errorBarLabel, pStyle) {
   const hasLmm = comparison.metrics.some((m) => m.lmm_pairwise !== undefined);
-  const testLabels = {
-    mann_whitney_u: "Mann-Whitney U",
-    kruskal_wallis: "Kruskal-Wallis",
-    welch_t: "Welch's t-test",
-    anova: "One-way ANOVA",
-  };
-  const testLabel = (t) => testLabels[t] || t;
-  const errorBar = comparison.error_bar === "sd" ? "sd" : "sem";
-  const errorBarLabel = errorBar === "sd" ? "표준편차(SD)" : "SEM";
-  const pStyle = comparison.p_style || "nejm";
+  const testLabel = (t) => COMPARE_TEST_LABELS[t] || t || "";
+  const singleGroup = comparison.labels.length < 2;
 
   const rows = comparison.metrics
     .map((m) => {
@@ -489,7 +489,7 @@ function renderComparisonResults(container, data) {
       return `<tr>
         <td>${fieldLabel(m.metric)}</td>
         <td>${groupsText}</td>
-        <td>${pText}</td>
+        ${singleGroup ? "" : `<td>${pText}</td>`}
         ${comparison.labels.length > 2 ? `<td>${posthocText}</td>` : ""}
         ${hasLmm ? `<td>${lmmText}</td>` : ""}
       </tr>`;
@@ -497,23 +497,49 @@ function renderComparisonResults(container, data) {
     .join("");
 
   const omnibusTestName = comparison.metrics.length ? testLabel(comparison.metrics[0].test) : "";
-  const groupHeaders = comparison.labels
-    .map((label, i) => `${label} (n=${comparison.n_videos[i]})`)
-    .join(", ");
-
-  container.innerHTML = `
-    ${urls.plot ? `<img src="${API_BASE}${urls.plot}" alt="comparison plot" />` : ""}
-    <p class="roi-applied-note">그룹: ${groupHeaders} &middot; 검정: ${comparison.test_family === "parametric" ? "모수 (Welch t / ANOVA + Tukey)" : "비모수 (Mann-Whitney / Kruskal-Wallis + Dunn)"} &middot; 오차막대: ${errorBarLabel}</p>
+  return `
     <table class="summary compare-table">
       <thead><tr>
         <th>지표</th>
         <th>그룹별 평균 &plusmn; ${errorBarLabel} (n)</th>
-        <th>${omnibusTestName} p-value</th>
+        ${singleGroup ? "" : `<th>${omnibusTestName} p-value</th>`}
         ${comparison.labels.length > 2 ? `<th>${comparison.posthoc_label || "post-hoc"}</th>` : ""}
         ${hasLmm ? "<th>LMM 쌍별 p-value (샘플 보정)</th>" : ""}
       </tr></thead>
       <tbody>${rows}</tbody>
-    </table>
+    </table>`;
+}
+
+function renderComparisonResults(container, data) {
+  const { comparison, urls } = data;
+  const errorBar = comparison.error_bar === "sd" ? "sd" : "sem";
+  const errorBarLabel = errorBar === "sd" ? "표준편차(SD)" : "SEM";
+  const pStyle = comparison.p_style || "nejm";
+  const testFamilyText =
+    comparison.test_family === "parametric" ? "모수 (Welch t / ANOVA + Tukey)" : "비모수 (Mann-Whitney / Kruskal-Wallis + Dunn)";
+  const groupHeaders = comparison.labels
+    .map((label, i) => `${label} (n=${comparison.n_videos[i]})`)
+    .join(", ");
+
+  let tables;
+  if (comparison.layout === "clustered") {
+    tables = comparison.per_category
+      .map(
+        (pc) => `
+        <h4 class="compare-category-title">${pc.category}
+          <span class="compare-category-sub">(${pc.comparison.labels.join(" vs ")}${pc.comparison.labels.length > 1 ? `, ${pc.comparison.labels[0]} 대비` : ""})</span>
+        </h4>
+        ${buildComparisonTable(pc.comparison, errorBar, errorBarLabel, pStyle)}`
+      )
+      .join("");
+  } else {
+    tables = buildComparisonTable(comparison, errorBar, errorBarLabel, pStyle);
+  }
+
+  container.innerHTML = `
+    ${urls.plot ? `<img src="${API_BASE}${urls.plot}" alt="comparison plot" />` : ""}
+    <p class="roi-applied-note">그룹: ${groupHeaders} &middot; 검정: ${testFamilyText}${comparison.layout === "clustered" ? " (묶음 안에서 비교)" : ""} &middot; 오차막대: ${errorBarLabel}</p>
+    ${tables}
     <div class="links">
       ${urls.plot ? `<a href="${API_BASE}${urls.plot}" download>그림 PNG (300 dpi)</a>` : ""}
       ${urls.plot_svg ? `<a href="${API_BASE}${urls.plot_svg}" download>그림 SVG (벡터, Illustrator/Inkscape 편집용)</a>` : ""}
@@ -560,6 +586,10 @@ function setupCompareGroups() {
         <div class="field compare-color-field">
           <label>막대 색</label>
           <input type="color" name="group_${idx}_color" value="${defaultColors[idx % defaultColors.length]}" title="그래프에서 이 그룹의 막대 색" />
+        </div>
+        <div class="field">
+          <label>묶음 (x축 카테고리, 선택)</label>
+          <input type="text" name="group_${idx}_category" placeholder="예: DC1 (세포주/환자)" title="넣으면 같은 묶음끼리 나란히 놓이는 grouped-bar 그림이 되고, 묶음 안에서 라벨끼리 비교합니다" />
         </div>
         <div class="field">
           <label>그룹 영상 (여러 개 선택)</label>

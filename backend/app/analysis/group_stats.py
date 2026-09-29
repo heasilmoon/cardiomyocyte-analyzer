@@ -472,3 +472,129 @@ def compare_groups(groups: list[GroupInput], test_family: TestFamily = "nonparam
         "posthoc_label": posthoc_label,
         "metrics": metrics,
     }
+
+
+def _describe_single_group(group: GroupInput) -> dict:
+    """compare_groups-shaped result for a category that has only one
+    condition: descriptive stats, no test."""
+    keys = set()
+    for s in group.summaries:
+        for k, v in s.items():
+            if k in _EXCLUDED_METRICS or isinstance(v, bool) or not isinstance(v, (int, float)):
+                continue
+            keys.add(k)
+    metrics = []
+    for key in sorted(keys):
+        vals, _ = _numeric_values_with_clusters(group.summaries, key, group.clusters)
+        if not vals:
+            continue
+        metrics.append(
+            {
+                "metric": key,
+                "groups": [
+                    {
+                        "label": group.label,
+                        "n": len(vals),
+                        "mean": float(np.mean(vals)),
+                        "std": float(np.std(vals, ddof=1)) if len(vals) > 1 else 0.0,
+                        "sem": float(np.std(vals, ddof=1) / np.sqrt(len(vals))) if len(vals) > 1 else 0.0,
+                        "shapiro_p": _shapiro_p(vals),
+                        "values": vals,
+                    }
+                ],
+                "test": None,
+                "statistic": None,
+                "p_value": None,
+            }
+        )
+    return {
+        "labels": [group.label],
+        "n_videos": [group.n_videos],
+        "test_family": "nonparametric",
+        "posthoc_label": "—",
+        "metrics": metrics,
+    }
+
+
+def compare_grouped(
+    groups: list[GroupInput], categories: list[str], test_family: TestFamily = "nonparametric"
+) -> dict:
+    """Two-factor ("grouped bars") comparison: each group belongs to a
+    category (x-axis cluster, e.g. cell line) and its label is the condition
+    within that category (e.g. Vehicle / Drug). Conditions are compared
+    *within* each category with compare_groups (Mann-Whitney U or Welch's
+    t for two conditions, Kruskal-Wallis / ANOVA + post-hoc for more), so
+    the figure can show one significance line per category — the layout of
+    a typical "Vehicle vs. treatment across lines" panel. No interaction
+    test is performed (that would be a two-way ANOVA).
+    """
+    if len(groups) != len(categories):
+        raise ValueError("categories must be given for every group")
+    if len(groups) < 2:
+        raise ValueError("compare_grouped needs at least 2 groups")
+
+    cat_order: list[str] = []
+    cond_order: list[str] = []
+    for g, c in zip(groups, categories):
+        if c not in cat_order:
+            cat_order.append(c)
+        if g.label not in cond_order:
+            cond_order.append(g.label)
+
+    per_category = []
+    for cat in cat_order:
+        subset = [g for g, c in zip(groups, categories) if c == cat]
+        if len(subset) >= 2:
+            comp = compare_groups(subset, test_family=test_family)
+        else:
+            comp = _describe_single_group(subset[0])
+        per_category.append({"category": cat, "comparison": comp})
+
+    # Metric order: most significant anywhere first, then alphabetical.
+    best_p: dict[str, float] = {}
+    for pc in per_category:
+        for m in pc["comparison"]["metrics"]:
+            p = m["p_value"]
+            key = m["metric"]
+            score = p if p is not None else 1.0
+            best_p[key] = min(best_p.get(key, 1.0), score)
+    metric_keys = sorted(best_p, key=lambda k: (best_p[k], k))
+
+    n_cond_max = max(len(pc["comparison"]["labels"]) for pc in per_category)
+    if n_cond_max <= 2:
+        posthoc_label = "Mann-Whitney U" if test_family == "nonparametric" else "Welch's t-test"
+    else:
+        posthoc_label = (
+            "Dunn's post-hoc (Bonferroni)" if test_family == "nonparametric" else "Tukey HSD post-hoc"
+        )
+
+    return {
+        "layout": "clustered",
+        "categories": cat_order,
+        "conditions": cond_order,
+        "labels": [f"{c} · {g.label}" for g, c in zip(groups, categories)],
+        "n_videos": [g.n_videos for g in groups],
+        "test_family": test_family,
+        "posthoc_label": posthoc_label,
+        "metric_keys": metric_keys,
+        "per_category": per_category,
+        # Flat metrics list (same shape as compare_groups) so generic code
+        # that only wants the metric names / groups keeps working: one entry
+        # per metric, groups = every category·condition bar.
+        "metrics": [
+            {
+                "metric": key,
+                "test": None,
+                "statistic": None,
+                "p_value": best_p[key] if best_p[key] < 1.0 else None,
+                "groups": [
+                    {**grp, "label": f"{pc['category']} · {grp['label']}"}
+                    for pc in per_category
+                    for m in pc["comparison"]["metrics"]
+                    if m["metric"] == key
+                    for grp in m["groups"]
+                ],
+            }
+            for key in metric_keys
+        ],
+    }
