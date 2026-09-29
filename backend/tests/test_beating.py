@@ -206,3 +206,12 @@ def test_consecutive_mode_ignores_keyframe_spikes_and_counts_real_beats():
     assert s["codec_artifact_warning"] is True
     assert s["n_spikes_removed"] >= 30
     assert s["n_beats"] <= 4  # not the 40 keyframe spikes
+
+
+def test_non_beating_video_reports_zero_bpm_not_none():
+    frames = np.full((90, 32, 32), 100, dtype=np.uint8)
+    for mode in ("reference", "optical_flow"):
+        s = analyze_beating(frames, 30.0, signal_mode=mode).summary
+        assert s["n_beats"] == 0
+        assert s["mean_bpm"] == 0.0
+        assert s["mean_inter_beat_interval_s"] is None

@@ -113,3 +113,31 @@ def test_individual_panels_are_written_for_both_layouts(tmp_path):
     assert all((sub / p["png"]).exists() for p in flat_panels)
     # Without panels_dir nothing extra is written and the return is empty.
     assert plotting.plot_group_comparison(flat, str(tmp_path / "flat2.png")) == []
+
+
+def test_metric_missing_in_one_group_is_kept_with_n_zero(tmp_path):
+    from app.analysis.group_stats import compare_groups
+
+    rng = np.random.default_rng(11)
+    a = _summaries(rng, 4, 40, 10)
+    b = _summaries(rng, 4, 30, 6)
+    c = [{"filename": f"c{i}.mp4", "mean_bpm": 0.0, "mean_amplitude": None} for i in range(3)]  # near-arrest
+    comp = compare_groups([GroupInput("5.1 mM", a), GroupInput("9.0 mM", b), GroupInput("11.0 mM", c)])
+    amp = next(m for m in comp["metrics"] if m["metric"] == "mean_amplitude")
+    assert [g["n"] for g in amp["groups"]] == [4, 4, 0]
+    assert amp["groups"][2]["mean"] is None
+    assert amp["n_groups_with_data"] == 2
+    assert amp["test"] == "mann_whitney_u" and amp["p_value"] is not None  # tested on the two groups with data
+    bpm = next(m for m in comp["metrics"] if m["metric"] == "mean_bpm")
+    assert bpm["groups"][2]["mean"] == 0.0  # 0 BPM is a real value and stays in the comparison
+    # Plots must cope with the empty group.
+    comp["error_bar"] = "sem"
+    plotting.plot_group_comparison(comp, str(tmp_path / "plot.png"), panels_dir=str(tmp_path))
+    assert (tmp_path / "plot.png").exists()
+    grouped = compare_grouped(
+        [GroupInput("Vehicle", a), GroupInput("UT H", c), GroupInput("Vehicle", b), GroupInput("UT H", b)],
+        ["C6", "C6", "AR05", "AR05"],
+    )
+    grouped["error_bar"] = "sem"
+    plotting.plot_group_comparison(grouped, str(tmp_path / "grouped.png"), panels_dir=str(tmp_path))
+    assert (tmp_path / "grouped.png").exists()

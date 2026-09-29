@@ -385,30 +385,51 @@ def compare_groups(groups: list[GroupInput], test_family: TestFamily = "nonparam
             vals, clus = _numeric_values_with_clusters(g.summaries, key, g.clusters)
             per_group_vals.append(vals)
             per_group_clusters.append(clus)
-        if any(len(v) == 0 for v in per_group_vals):
+        if all(len(v) == 0 for v in per_group_vals):
             continue
 
+        # A group can lack a metric entirely (e.g. no relaxation wave was
+        # found in any of its videos). Keep the metric, show that group as
+        # n = 0, and run the test on the groups that do have values — so a
+        # single near-arrest condition doesn't make the whole panel vanish.
         entry: dict = {
             "metric": key,
             "groups": [
                 {
                     "label": label,
                     "n": len(vals),
-                    "mean": float(np.mean(vals)),
-                    "std": float(np.std(vals, ddof=1)) if len(vals) > 1 else 0.0,
-                    "sem": float(np.std(vals, ddof=1) / np.sqrt(len(vals))) if len(vals) > 1 else 0.0,
-                    "shapiro_p": _shapiro_p(vals),
+                    "mean": float(np.mean(vals)) if vals else None,
+                    "std": (float(np.std(vals, ddof=1)) if len(vals) > 1 else 0.0) if vals else None,
+                    "sem": (float(np.std(vals, ddof=1) / np.sqrt(len(vals))) if len(vals) > 1 else 0.0) if vals else None,
+                    "shapiro_p": _shapiro_p(vals) if vals else None,
                     "values": vals,
                 }
                 for label, vals in zip(labels, per_group_vals)
             ],
             "statistic": None,
             "p_value": None,
+            "n_groups_with_data": int(sum(1 for v in per_group_vals if v)),
         }
 
-        has_variance = len({v for vals in per_group_vals for v in vals}) > 1
+        present = [i for i, v in enumerate(per_group_vals) if v]
+        labels_present = [labels[i] for i in present]
+        vals_present = [per_group_vals[i] for i in present]
+        clusters_present = [per_group_clusters[i] for i in present]
+        has_variance = len({v for vals in vals_present for v in vals}) > 1
 
-        if len(groups) == 2:
+        if len(present) < 2:
+            entry["test"] = None
+            if len(groups) > 2:
+                entry["posthoc"] = None
+            metrics.append(entry)
+            continue
+
+        # From here on the tests see only the groups that have data.
+        per_group_vals = vals_present
+        per_group_clusters = clusters_present
+        labels_for_test = labels_present
+
+        if len(present) == 2:
             if test_family == "nonparametric":
                 entry["test"] = "mann_whitney_u"
                 if has_variance:
@@ -439,7 +460,7 @@ def compare_groups(groups: list[GroupInput], test_family: TestFamily = "nonparam
                         entry["p_value"] = float(result.pvalue)
                     except ValueError:
                         pass
-                entry["posthoc"] = _dunns_posthoc(labels, per_group_vals) if entry["p_value"] is not None else None
+                entry["posthoc"] = _dunns_posthoc(labels_for_test, per_group_vals) if entry["p_value"] is not None else None
             else:
                 entry["test"] = "anova"
                 entry["welch_anova_p_value"] = None
@@ -455,9 +476,9 @@ def compare_groups(groups: list[GroupInput], test_family: TestFamily = "nonparam
                         entry["welch_anova_p_value"] = float(welch.pvalue) if np.isfinite(welch.pvalue) else None
                     except Exception:
                         pass
-                entry["posthoc"] = _parametric_posthoc(labels, per_group_vals) if entry["p_value"] is not None else None
+                entry["posthoc"] = _parametric_posthoc(labels_for_test, per_group_vals) if entry["p_value"] is not None else None
 
-        lmm = _fit_lmm_pairwise(labels, per_group_vals, per_group_clusters)
+        lmm = _fit_lmm_pairwise(labels_for_test, per_group_vals, per_group_clusters)
         if lmm is not None:
             entry.update(lmm)
 

@@ -603,11 +603,17 @@ def _flat_panel(
     labels = [g["label"] for g in groups]
     n_groups = len(groups)
     xs = np.arange(n_groups)
-    means = [g["mean"] for g in groups]
+    # Groups without data for this metric (mean None) get no bar; "n = 0"
+    # is written where the bar would be.
+    means = [np.nan if g["mean"] is None else float(g["mean"]) for g in groups]
     if error_bar == "sd":
-        errs = [g["std"] for g in groups]
+        errs = [0.0 if g.get("std") is None else float(g["std"]) for g in groups]
     else:
-        errs = [g.get("sem", g["std"] / np.sqrt(g["n"]) if g["n"] > 1 else 0.0) for g in groups]
+        errs = [
+            0.0 if g.get("sem") is None and g.get("std") is None
+            else float(g.get("sem") if g.get("sem") is not None else (g["std"] / np.sqrt(g["n"]) if g["n"] > 1 else 0.0))
+            for g in groups
+        ]
     colors = _resolve_group_colors(comparison, n_groups)
 
     ax.bar(xs, means, width=0.6, color=colors, alpha=0.85, edgecolor="black", linewidth=0.7, zorder=2)
@@ -616,11 +622,15 @@ def _flat_panel(
     all_values: list[float] = []
     for gi, g in enumerate(groups):
         vals = np.asarray(g["values"], dtype=float)
+        if len(vals) == 0:
+            ax.text(xs[gi], 0, "n = 0", ha="center", va="bottom", fontsize=6, color="#888888")
+            continue
         jitter = rng.uniform(-0.14, 0.14, len(vals)) if len(vals) > 1 else np.zeros(len(vals))
         ax.scatter(xs[gi] + jitter, vals, color="white", edgecolor="black", linewidth=0.6, s=14, zorder=5)
         all_values.extend(vals.tolist())
 
-    data_max = max(max(all_values, default=0.0), max(mu + e for mu, e in zip(means, errs)))
+    tops = [mu + e for mu, e in zip(means, errs) if not np.isnan(mu)]
+    data_max = max(max(all_values, default=0.0), max(tops, default=0.0))
     data_min = min(min(all_values, default=0.0), 0.0)
     span = (data_max - data_min) or 1.0
 
@@ -738,7 +748,10 @@ def _clustered_panel(
                 continue
             ki = conditions.index(grp["label"])
             x = bar_x(ci, ki)
-            err = grp["std"] if error_bar == "sd" else grp.get("sem", 0.0)
+            if grp["mean"] is None:
+                ax.text(x, 0, "n = 0", ha="center", va="bottom", fontsize=5.5, color="#888888")
+                continue
+            err = (grp.get("std") if error_bar == "sd" else grp.get("sem")) or 0.0
             ax.bar(x, grp["mean"], width=bw * 0.92, color=colors[grp["label"]], alpha=0.85, edgecolor="black", linewidth=0.7, zorder=2)
             ax.errorbar(x, grp["mean"], yerr=err, fmt="none", ecolor="black", elinewidth=0.8, capsize=2.0, capthick=0.8, zorder=4)
             vals = np.asarray(grp["values"], dtype=float)
