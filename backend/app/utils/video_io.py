@@ -9,16 +9,23 @@ class VideoLoadError(ValueError):
     pass
 
 
-def read_video_frames(
+def read_video_frames_scaled(
     path: str,
     grayscale: bool = True,
     max_frames: int | None = None,
-) -> tuple[np.ndarray, float]:
+    max_side: int | None = None,
+) -> tuple[np.ndarray, float, float]:
     """Read an mp4 (or any OpenCV-readable video) into a numpy array.
 
-    Returns (frames, fps) where frames has shape (N, H, W) if grayscale
+    Returns (frames, fps, scale). frames has shape (N, H, W) if grayscale
     else (N, H, W, 3). fps falls back to 30.0 when the container doesn't
     report a valid frame rate (common for re-encoded/screen-captured mp4s).
+
+    max_side: when the longer frame side exceeds it, every frame is
+    downscaled with area averaging (cv2.INTER_AREA) so a 1920x1080 recording
+    doesn't need gigabytes of RAM; scale is analysis_px / original_px
+    (1.0 when nothing was resized). Area averaging also suppresses sensor
+    noise, so beat detection usually improves rather than degrades.
     """
     cap = cv2.VideoCapture(path)
     if not cap.isOpened():
@@ -30,6 +37,8 @@ def read_video_frames(
 
     frames = []
     count = 0
+    scale = 1.0
+    target_size = None
     while True:
         ok, frame = cap.read()
         if not ok:
@@ -38,6 +47,12 @@ def read_video_frames(
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         else:
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        if count == 0 and max_side and max(frame.shape[:2]) > max_side:
+            h, w = frame.shape[:2]
+            scale = max_side / float(max(h, w))
+            target_size = (max(1, int(round(w * scale))), max(1, int(round(h * scale))))
+        if target_size is not None:
+            frame = cv2.resize(frame, target_size, interpolation=cv2.INTER_AREA)
         frames.append(frame)
         count += 1
         if max_frames is not None and count >= max_frames:
@@ -47,7 +62,19 @@ def read_video_frames(
     if not frames:
         raise VideoLoadError(f"No frames could be decoded from: {path}")
 
-    return np.stack(frames, axis=0), float(fps)
+    return np.stack(frames, axis=0), float(fps), float(scale)
+
+
+def read_video_frames(
+    path: str,
+    grayscale: bool = True,
+    max_frames: int | None = None,
+    max_side: int | None = None,
+) -> tuple[np.ndarray, float]:
+    """read_video_frames_scaled without the scale factor (kept for callers
+    that don't need it)."""
+    frames, fps, _scale = read_video_frames_scaled(path, grayscale=grayscale, max_frames=max_frames, max_side=max_side)
+    return frames, fps
 
 
 def extract_first_frame_png(path: str) -> bytes:

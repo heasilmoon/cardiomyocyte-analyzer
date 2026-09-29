@@ -31,3 +31,13 @@ def test_apply_roi_clamps_negative_origin():
     cropped, applied = _apply_roi(frames, -5, -5, 10, 10)
     assert applied == {"x": 0, "y": 0, "w": 5, "h": 5}
     assert cropped.shape == (3, 5, 5)
+
+
+def test_apply_roi_scales_original_coordinates_to_downscaled_frames():
+    # Original video 200x100, analyzed at half size (100x50): an ROI drawn on
+    # the full-size preview at (40, 20) 80x40 must crop (20, 10) 40x20.
+    frames = np.zeros((3, 50, 100), dtype=np.uint8)
+    cropped, applied = _apply_roi(frames, 40, 20, 80, 40, scale=0.5)
+    assert cropped.shape == (3, 20, 40)
+    assert (applied["x"], applied["y"], applied["w"], applied["h"]) == (40, 20, 80, 40)
+    assert applied["analysis_px"] == {"x": 20, "y": 10, "w": 40, "h": 20}

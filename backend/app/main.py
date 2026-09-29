@@ -27,9 +27,9 @@ from app.analysis.colocalization import analyze_colocalization
 from app.analysis.group_stats import GroupInput, compare_groups
 from app.analysis.morphology import analyze_morphology_2d, analyze_morphology_3d
 from app.analysis.validation_stats import compute_agreement
-from app.config import FRONTEND_DIR, MAX_FRAMES, MAX_UPLOAD_BYTES, RESULTS_DIR, UPLOADS_DIR
+from app.config import FRONTEND_DIR, MAX_FRAME_SIDE, MAX_FRAMES, MAX_UPLOAD_BYTES, RESULTS_DIR, UPLOADS_DIR
 from app.utils import result_storage
-from app.utils.video_io import VideoLoadError, extract_first_frame_png, read_video_frames
+from app.utils.video_io import VideoLoadError, extract_first_frame_png, read_video_frames_scaled
 
 BeatingSignalMode = Literal["reference", "consecutive", "piv", "optical_flow"]
 
@@ -160,20 +160,46 @@ def _save_upload(file: UploadFile) -> Path:
                 dest.unlink(missing_ok=True)
                 raise HTTPException(
                     status_code=413,
-                    detail=f"File exceeds max upload size of {MAX_UPLOAD_BYTES // (1024 * 1024)} MB",
+                    detail=(
+                        f"File exceeds max upload size of {MAX_UPLOAD_BYTES // (1024 * 1024)} MB "
+                        "(raise it with the MAX_UPLOAD_MB environment variable, or trim the clip "
+                        "with tools/shrink_video.py)"
+                    ),
                 )
             out.write(chunk)
     return dest
 
 
-def _load_frames(path: Path, fps_override: float | None):
+def _load_frames(path: Path, fps_override: float | None, downscale: bool = True):
+    """Decode a video for analysis. Returns (frames, fps, scale).
+
+    downscale=True (beating / calcium) shrinks frames whose longer side
+    exceeds MAX_FRAME_SIDE; scale = analysis_px / original_px. Morphology
+    and colocalization keep full resolution (their outputs are in px)."""
     try:
-        frames, fps = read_video_frames(str(path), grayscale=True, max_frames=MAX_FRAMES)
+        frames, fps, scale = read_video_frames_scaled(
+            str(path),
+            grayscale=True,
+            max_frames=MAX_FRAMES,
+            max_side=(MAX_FRAME_SIDE if downscale and MAX_FRAME_SIDE > 0 else None),
+        )
     except VideoLoadError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if fps_override:
         fps = fps_override
-    return frames, fps
+    return frames, fps, scale
+
+
+def _scale_um_per_px(um_per_px: float | None, scale: float) -> float | None:
+    """Pixel size for the (possibly downscaled) analysis frames."""
+    if um_per_px is None or not scale or scale == 1.0:
+        return um_per_px
+    return float(um_per_px) / float(scale)
+
+
+def _stamp_scale(summary: dict, frames, scale: float) -> None:
+    summary["downscale_factor"] = round(float(scale), 4)
+    summary["analysis_frame_size"] = f"{frames.shape[2]}x{frames.shape[1]}"
 
 
 def _apply_roi(
@@ -182,26 +208,34 @@ def _apply_roi(
     roi_y: int | None,
     roi_w: int | None,
     roi_h: int | None,
+    scale: float = 1.0,
 ) -> tuple[object, dict | None]:
     """Crop frames to a user-selected region of interest, if one was given.
 
-    Coordinates are pixel offsets in the *original* (uncropped) frame, top
-    -left origin — what the frontend's ROI canvas reports. Clamped to the
-    frame bounds rather than rejected outright, since a rectangle drawn
-    against a downscaled canvas preview can round to just outside the
-    native frame edge by a pixel or two. Returns (frames, applied_roi) so
-    the caller can report back exactly what was used (None if no ROI was
-    given, or if the request omitted any of the four fields).
+    Coordinates are pixel offsets in the *original* (uncropped, full-size)
+    frame, top-left origin — what the frontend's ROI canvas reports from
+    the full-size preview. When the frames were downscaled on load
+    (scale < 1), the rectangle is scaled to match. Clamped to the frame
+    bounds rather than rejected outright, since a rectangle drawn against
+    a canvas preview can round to just outside the edge by a pixel or two.
+    Returns (frames, applied_roi) with applied_roi in original-frame
+    pixels (None if no ROI was given, or if any of the four fields is
+    missing).
     """
     if roi_x is None or roi_y is None or roi_w is None or roi_h is None:
         return frames, None
     _, h, w = frames.shape
-    x0 = max(0, min(int(roi_x), w - 1))
-    y0 = max(0, min(int(roi_y), h - 1))
-    x1 = max(x0 + 1, min(int(roi_x) + int(roi_w), w))
-    y1 = max(y0 + 1, min(int(roi_y) + int(roi_h), h))
+    s = float(scale) if scale else 1.0
+    rx, ry, rw, rh = int(roi_x) * s, int(roi_y) * s, int(roi_w) * s, int(roi_h) * s
+    x0 = max(0, min(int(round(rx)), w - 1))
+    y0 = max(0, min(int(round(ry)), h - 1))
+    x1 = max(x0 + 1, min(int(round(rx + rw)), w))
+    y1 = max(y0 + 1, min(int(round(ry + rh)), h))
     cropped = frames[:, y0:y1, x0:x1]
-    return cropped, {"x": x0, "y": y0, "w": x1 - x0, "h": y1 - y0}
+    applied = {"x": int(round(x0 / s)), "y": int(round(y0 / s)), "w": int(round((x1 - x0) / s)), "h": int(round((y1 - y0) / s))}
+    if s != 1.0:
+        applied["analysis_px"] = {"x": x0, "y": y0, "w": x1 - x0, "h": y1 - y0}
+    return cropped, applied
 
 
 def _new_result_dir() -> tuple[str, Path]:
@@ -263,8 +297,8 @@ async def analyze_beating_endpoint(
         raise HTTPException(status_code=400, detail="um_per_px must be > 0")
     upload_path = _save_upload(file)
     try:
-        frames, fps = _load_frames(upload_path, fps_override)
-        frames, applied_roi = _apply_roi(frames, roi_x, roi_y, roi_w, roi_h)
+        frames, fps, scale = _load_frames(upload_path, fps_override)
+        frames, applied_roi = _apply_roi(frames, roi_x, roi_y, roi_w, roi_h, scale)
         result = analyze_beating(
             frames,
             fps,
@@ -274,10 +308,11 @@ async def analyze_beating_endpoint(
             reference_index=reference_index,
             piv_window_size=piv_window_size,
             piv_step=piv_step,
-            um_per_px=um_per_px,
+            um_per_px=_scale_um_per_px(um_per_px, scale),
             flow_winsize=flow_winsize,
             wave_threshold_frac=wave_threshold_frac,
         )
+        _stamp_scale(result.summary, frames, scale)
     finally:
         upload_path.unlink(missing_ok=True)
 
@@ -317,17 +352,17 @@ async def analyze_calcium_endpoint(
     uses the darkest 5% of pixels; 'none' skips subtraction."""
     upload_path = _save_upload(file)
     try:
-        frames, fps = _load_frames(upload_path, fps_override)
+        frames, fps, scale = _load_frames(upload_path, fps_override)
         background_trace = None
         applied_bg_roi = None
         if background_mode == "manual":
-            bg_frames, applied_bg_roi = _apply_roi(frames, bg_x, bg_y, bg_w, bg_h)
+            bg_frames, applied_bg_roi = _apply_roi(frames, bg_x, bg_y, bg_w, bg_h, scale)
             if applied_bg_roi is None:
                 raise HTTPException(
                     status_code=400, detail="background_mode=manual requires bg_x, bg_y, bg_w and bg_h"
                 )
             background_trace = bg_frames.mean(axis=(1, 2)).astype("float64")
-        frames, applied_roi = _apply_roi(frames, roi_x, roi_y, roi_w, roi_h)
+        frames, applied_roi = _apply_roi(frames, roi_x, roi_y, roi_w, roi_h, scale)
         result = analyze_calcium(
             frames,
             fps,
@@ -336,6 +371,7 @@ async def analyze_calcium_endpoint(
             background_trace=background_trace,
             auto_background=(background_mode == "auto"),
         )
+        _stamp_scale(result.summary, frames, scale)
     finally:
         upload_path.unlink(missing_ok=True)
 
@@ -365,7 +401,7 @@ async def analyze_morphology_endpoint(
 ):
     upload_path = _save_upload(file)
     try:
-        frames, _fps = _load_frames(upload_path, None)
+        frames, _fps, _scale = _load_frames(upload_path, None, downscale=False)
         if mode == "2d":
             result = analyze_morphology_2d(
                 frames,
@@ -401,11 +437,18 @@ def _analyze_one(
     fps,
     signal_mode: str = "reference",
     um_per_px: float | None = None,
+    scale: float = 1.0,
 ) -> dict:
     if analysis_type == "beating":
-        return analyze_beating(frames, fps, signal_mode=signal_mode, um_per_px=um_per_px).summary
+        summary = analyze_beating(
+            frames, fps, signal_mode=signal_mode, um_per_px=_scale_um_per_px(um_per_px, scale)
+        ).summary
+        _stamp_scale(summary, frames, scale)
+        return summary
     if analysis_type == "calcium":
-        return analyze_calcium(frames, fps).summary
+        summary = analyze_calcium(frames, fps).summary
+        _stamp_scale(summary, frames, scale)
+        return summary
     if morphology_mode == "2d":
         return analyze_morphology_2d(frames).summary
     return analyze_morphology_3d(frames).summary
@@ -422,8 +465,8 @@ async def _summarize_group(
     for f in files:
         path = _save_upload(f)
         try:
-            frames, fps = _load_frames(path, None)
-            summary = _analyze_one(analysis_type, morphology_mode, frames, fps, signal_mode, um_per_px)
+            frames, fps, scale = _load_frames(path, None, downscale=(analysis_type != "morphology"))
+            summary = _analyze_one(analysis_type, morphology_mode, frames, fps, signal_mode, um_per_px, scale)
             summaries.append({"filename": f.filename, **summary})
         finally:
             path.unlink(missing_ok=True)
@@ -636,7 +679,7 @@ async def validate_agreement_endpoint(
 def _load_projection(file: UploadFile):
     path = _save_upload(file)
     try:
-        frames, _fps = _load_frames(path, None)
+        frames, _fps, _scale = _load_frames(path, None, downscale=False)
         return frames.max(axis=0) if frames.ndim == 3 else frames
     finally:
         path.unlink(missing_ok=True)
