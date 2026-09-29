@@ -123,8 +123,8 @@ def _pair_strokes(
     strokes: np.ndarray,
     baseline: float,
     period_frames: float,
-    min_secondary_frac: float = 0.2,
-    max_pair_gap_frac: float = 0.6,
+    min_secondary_frac: float = 0.1,
+    max_pair_gap_frac: float = 0.75,
 ) -> list[tuple[int, int | None]]:
     """Pair each beat anchor (the tallest stroke of a beat) with the other
     stroke of the same beat, giving (contraction_idx, relaxation_idx|None).
@@ -151,12 +151,37 @@ def _pair_strokes(
             if best is None or speed[s] > speed[best]:
                 best = int(s)
         if best is None:
+            # Fallback for a slow, low relaxation wave that never forms a
+            # sharp enough peak for detect_peaks: after the speed dips
+            # following the anchor, take the highest point of the hump
+            # that follows, if it rises clearly above baseline again.
+            best = _relaxation_hump(speed, int(a), hi, baseline, anchor_height, min_secondary_frac)
+        if best is None:
             pairs.append((int(a), None))
         elif best < a:
             pairs.append((best, int(a)))
         else:
             pairs.append((int(a), best))
     return pairs
+
+
+def _relaxation_hump(
+    speed: np.ndarray, a: int, hi: int, baseline: float, anchor_height: float, min_frac: float
+) -> int | None:
+    if hi - a < 4:
+        return None
+    seg = speed[a : hi + 1]
+    dip = int(np.argmin(seg[: max(2, len(seg) // 2)]))  # dip must come in the first half of the window
+    if dip < 1 or dip >= len(seg) - 2:
+        return None
+    after = seg[dip:]
+    j = dip + int(np.argmax(after))
+    if j <= dip or j >= len(seg) - 1:
+        return None  # hump must be an interior maximum, not the window edge
+    rise = seg[j] - seg[dip]
+    if seg[j] - baseline < min_frac * anchor_height or rise < 0.5 * min_frac * anchor_height:
+        return None
+    return a + j
 
 
 def _walk_while_above(signal: np.ndarray, start: int, threshold: float, direction: int, bound: int) -> int:
@@ -198,8 +223,11 @@ def analyze_speed_waves(
     # Stroke peaks: finer spacing so both strokes of a beat can be found
     # (they are usually >= ~15 % of a period apart).
     stroke_gap_bpm = 60.0 * fps / max(0.15 * period_frames, 1.0)
+    # Relaxation strokes are often much lower than contraction strokes, so
+    # candidates are searched with half the anchor prominence; the pairing
+    # step still requires them to sit clearly above baseline.
     strokes = np.asarray(
-        detect_peaks(speed, fps, min_bpm_gap=stroke_gap_bpm, prominence_frac=prominence_frac), dtype=int
+        detect_peaks(speed, fps, min_bpm_gap=stroke_gap_bpm, prominence_frac=0.5 * prominence_frac), dtype=int
     )
 
     lo = float(np.percentile(speed, 10))
