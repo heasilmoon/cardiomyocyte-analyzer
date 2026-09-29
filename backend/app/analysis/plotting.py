@@ -231,15 +231,32 @@ def _draw_orientation_map(ax, orientation_map: np.ndarray, coherence_map: np.nda
     ax.axis("off")
 
 
-def _format_p(p: float | None, style: str = "value") -> str:
+def _nejm_stars(p: float) -> str:
+    if p < 0.001:
+        return "***"
+    if p < 0.01:
+        return "**"
+    if p < 0.05:
+        return "*"
+    return "ns"
+
+
+def _format_p(p: float | None, style: str = "nejm") -> str:
     """p-value text for brackets/subtitles.
 
-    style "value": GraphPad Prism-style exact p (4 decimals, '< 0.0001').
-    style "stars": the asterisk convention (* < 0.05, ** < 0.01,
-    *** < 0.001, **** < 0.0001, 'ns' otherwise).
+    style "nejm" (default, Prism's "NEJM" P value style): two significant
+    digits with the significance level in parentheses — p = 0.12 (ns),
+    p = 0.033 (*), p = 0.002 (**), p < 0.001 (***).
+    style "value": Prism's exact-p style (4 decimals, '< 0.0001').
+    style "stars": asterisks only (* < 0.05, ** < 0.01, *** < 0.001,
+    **** < 0.0001, 'ns' otherwise).
     """
     if p is None:
         return "n/a" if style == "stars" else "p = n/a"
+    if style == "nejm":
+        if p < 0.001:
+            return "p < 0.001 (***)"
+        return f"p = {p:.2g} ({_nejm_stars(p)})"
     if style == "stars":
         if p < 0.0001:
             return "****"
@@ -261,10 +278,10 @@ def _format_p(p: float | None, style: str = "value") -> str:
 _METRIC_DISPLAY: dict[str, tuple[str, str]] = {
     # Beating (reference / consecutive / piv)
     "n_beats": ("Number of beats", "count"),
-    "mean_bpm": ("Beat rate", "BPM"),
+    "mean_bpm": ("Beating rate", "BPM"),
     "mean_inter_beat_interval_s": ("Inter-beat interval", "s"),
     "ibi_std_s": ("Inter-beat interval SD", "s"),
-    "ibi_cv_percent": ("Beat rate variability", "IBI CV (%)"),
+    "ibi_cv_percent": ("Beating rate variability", "IBI CV (%)"),
     "mean_amplitude": ("Contraction amplitude", "a.u."),
     "amplitude_cv_percent": ("Amplitude variability", "CV (%)"),
     "mean_contraction_time_s": ("Contraction time", "s"),
@@ -368,7 +385,7 @@ def _metric_display(key: str, comparison: dict | None = None) -> tuple[str, str]
 # Unit -> y-axis label with the quantity spelled out (a bare "s" reads badly).
 _AXIS_LABELS = {
     "s": "Time (s)",
-    "BPM": "Beats per minute",
+    "BPM": "Beats per minute (BPM)",
     "count": "Count",
     "a.u.": "Amplitude (a.u.)",
     "a.u./s": "Velocity (a.u./s)",
@@ -487,6 +504,8 @@ def _figure_caption(comparison: dict, error_bar: str, p_style: str) -> str:
         bracket = f"Brackets: each group vs. {labels[0]}"
     if p_style == "stars":
         bracket += "; *p < 0.05, **p < 0.01, ***p < 0.001, ****p < 0.0001, ns not significant"
+    elif p_style == "nejm":
+        bracket += "; *p < 0.05, **p < 0.01, ***p < 0.001, ns not significant"
     parts = [f"Mean ± {error_bar.upper()}; dots are individual videos", stats, bracket]
     if n_text:
         parts.append(n_text)
@@ -514,9 +533,9 @@ def plot_group_comparison(comparison: dict, out_path: str, max_metrics: int = 12
     error_bar = comparison.get("error_bar", "sem")
     if error_bar not in ("sem", "sd"):
         error_bar = "sem"
-    p_style = comparison.get("p_style", "value")
-    if p_style not in ("value", "stars"):
-        p_style = "value"
+    p_style = comparison.get("p_style", "nejm")
+    if p_style not in ("nejm", "value", "stars"):
+        p_style = "nejm"
 
     if not metrics:
         fig, ax = plt.subplots(figsize=(4, 2))
@@ -568,7 +587,7 @@ def _draw_group_comparison(comparison: dict, metrics: list, error_bar: str, p_st
         span = (data_max - data_min) or 1.0
 
         height = data_max + 0.08 * span
-        step = 0.13 * span if p_style == "value" else 0.11 * span
+        step = 0.11 * span if p_style == "stars" else 0.13 * span
         tick = 0.025 * span
         pairs = _bracket_pairs(m, labels)
         for i, j, p in pairs:

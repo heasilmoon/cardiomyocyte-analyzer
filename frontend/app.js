@@ -127,10 +127,36 @@ function fieldLabel(key) {
   return labels[key] || key;
 }
 
+// Numbers are shown with 4 significant digits (GraphPad Prism's default
+// "significant digits for everything except P values").
 function formatValue(v) {
   if (v === null || v === undefined) return "&mdash;";
-  if (typeof v === "number") return Number.isInteger(v) ? v : v.toFixed(3);
+  if (typeof v === "number") {
+    if (Number.isInteger(v)) return v;
+    const a = Math.abs(v);
+    if (a !== 0 && (a >= 1e6 || a < 1e-4)) return v.toPrecision(4);
+    return String(parseFloat(v.toPrecision(4)));
+  }
   return String(v);
+}
+
+// P values: NEJM style (2 significant digits, "< 0.001", ns/*/**/***) by
+// default; "value" = 4 decimals; "stars" = asterisks only.
+function nejmStars(p) {
+  if (p < 0.001) return "***";
+  if (p < 0.01) return "**";
+  if (p < 0.05) return "*";
+  return "ns";
+}
+function formatP(p, style) {
+  if (p === null || p === undefined || Number.isNaN(p)) return "&mdash;";
+  if (style === "stars") {
+    if (p < 0.0001) return "****";
+    return nejmStars(p);
+  }
+  if (style === "value") return (p < 0.0001 ? "< 0.0001" : p.toFixed(4)) + (p < 0.05 ? " *" : "");
+  if (p < 0.001) return "&lt; 0.001 (***)";
+  return `${parseFloat(p.toPrecision(2))} (${nejmStars(p)})`;
 }
 
 function renderResults(container, data) {
@@ -418,13 +444,13 @@ function renderComparisonResults(container, data) {
   const testLabel = (t) => testLabels[t] || t;
   const errorBar = comparison.error_bar === "sd" ? "sd" : "sem";
   const errorBarLabel = errorBar === "sd" ? "표준편차(SD)" : "SEM";
+  const pStyle = comparison.p_style || "nejm";
 
   const rows = comparison.metrics
     .map((m) => {
-      const sig = m.p_value !== null && m.p_value < 0.05 ? " *" : "";
-      let pText = m.p_value !== null ? m.p_value.toFixed(4) + sig : "&mdash;";
+      let pText = formatP(m.p_value, pStyle);
       if (m.test === "anova" && m.welch_anova_p_value !== null && m.welch_anova_p_value !== undefined) {
-        pText += `<br/><span style="color:var(--muted)">Welch ANOVA p=${m.welch_anova_p_value.toFixed(4)}</span>`;
+        pText += `<br/><span style="color:var(--muted)">Welch ANOVA p=${formatP(m.welch_anova_p_value, pStyle)}</span>`;
       }
       const groupsText = m.groups
         .map((g) => {
@@ -442,13 +468,12 @@ function renderComparisonResults(container, data) {
         posthocText = m.posthoc
           .map((p) => {
             const pv = p.p_adjusted;
-            const s = pv !== null && pv !== undefined && pv < 0.05 ? " *" : "";
-            const pvText = pv !== null && pv !== undefined ? pv.toFixed(4) : "n/a";
+            const pvText = pv !== null && pv !== undefined ? formatP(pv, pStyle) : "n/a";
             const alt =
               p.p_value_welch_holm !== undefined
-                ? ` <span style="color:var(--muted)">(Welch+Holm ${p.p_value_welch_holm.toFixed(4)})</span>`
+                ? ` <span style="color:var(--muted)">(Welch+Holm ${formatP(p.p_value_welch_holm, pStyle)})</span>`
                 : "";
-            return `${p.group_a} vs ${p.group_b}: p=${pvText}${s}${alt}`;
+            return `${p.group_a} vs ${p.group_b}: p=${pvText}${alt}`;
           })
           .join("<br/>");
       }
@@ -456,10 +481,7 @@ function renderComparisonResults(container, data) {
       let lmmText = "&mdash;";
       if (m.lmm_pairwise) {
         lmmText = m.lmm_pairwise
-          .map((p) => {
-            const s = p.p_value < 0.05 ? " *" : "";
-            return `${p.group_a} vs ${p.group_b}: p=${p.p_value.toFixed(4)}${s}`;
-          })
+          .map((p) => `${p.group_a} vs ${p.group_b}: p=${formatP(p.p_value, pStyle)}`)
           .join("<br/>");
         lmmText += `<br/><span style="color:var(--muted)">(${m.lmm_n_clusters} clusters)</span>`;
       }

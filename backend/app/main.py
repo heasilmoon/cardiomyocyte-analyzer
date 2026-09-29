@@ -601,9 +601,9 @@ async def analyze_compare_endpoint(request: Request):
     if len(groups) < 2:
         raise HTTPException(status_code=400, detail="Need at least 2 groups, each with at least one video file")
 
-    p_style = str(form.get("p_style") or "value").lower()
-    if p_style not in ("value", "stars"):
-        raise HTTPException(status_code=400, detail="p_style must be 'value' or 'stars'")
+    p_style = str(form.get("p_style") or "nejm").lower()
+    if p_style not in ("nejm", "value", "stars"):
+        raise HTTPException(status_code=400, detail="p_style must be 'nejm', 'value' or 'stars'")
 
     comparison = compare_groups(groups, test_family=test_family)
     comparison["error_bar"] = error_bar
