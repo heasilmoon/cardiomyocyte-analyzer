@@ -28,6 +28,7 @@ function fieldLabel(key) {
     fps: "프레임 속도 (fps, 초당 프레임 수)",
     n_frames: "프레임 수",
     downscale_factor: "분석 시 축소 배율 (1 = 원본 크기)",
+    px_per_analysis_px: "분석 픽셀 1개 = 원본 픽셀 (px/s는 원본 픽셀 기준)",
     analysis_frame_size: "분석에 쓴 프레임 크기 (px)",
     duration_s: "영상 길이 (s)",
     mean_bpm: "평균 박동수 (BPM)",

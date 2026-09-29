@@ -71,6 +71,7 @@ _EXCLUDED_METRICS = {
     # Recording / analysis settings, not biology.
     "fps",
     "downscale_factor",
+    "px_per_analysis_px",
     "um_per_px",
     "farneback_winsize",
     "wave_threshold_frac",

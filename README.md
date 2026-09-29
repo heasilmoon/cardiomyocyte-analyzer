@@ -370,8 +370,14 @@ python tools/shrink_video.py 원본.mp4 작은클립.mp4 --seconds 5 --width 320
   0이면 끄기)를 넘으면 면적 평균(INTER_AREA)으로 자동 축소한 뒤 분석합니다 — 1920×1080·60 fps 영상을
   원본 크기로 3,000프레임 읽으면 메모리를 수 GB 쓰기 때문입니다(축소는 노이즈도 줄여서 박동 검출에는
   보통 이득). ROI는 원본 좌표로 그리면 자동 환산되고, `um_per_px`도 축소 배율에 맞춰 보정되며,
-  결과 요약에 `downscale_factor`와 `analysis_frame_size`가 기록됩니다. 형태 분석과 colocalization은
-  px 단위 결과라 축소하지 않습니다. 환경변수는 로컬에서는 `MAX_UPLOAD_MB=2048 uvicorn app.main:app`
+  결과 요약에 `downscale_factor`와 `analysis_frame_size`가 기록됩니다. `optical_flow`의 px/s 속도와
+  px 경로 길이는 축소와 무관하게 **원본 영상 픽셀 기준**으로 환산해서 보고하므로(요약의
+  `px_per_analysis_px`), 축소 전후·해상도가 다른 영상끼리도 같은 단위입니다. 다만 단위가 같아도
+  Farneback 광류의 절댓값은 텍스처 크기와 `poly_n`의 관계에 따라 달라져서(합성 조직 영상에서 절반
+  해상도로 분석하면 같은 단위로 환산해도 속도가 약 1.5배 크게 나왔습니다), **속도 지표는 같은
+  `MAX_FRAME_SIDE`로 분석한 영상끼리만 비교**하세요 — 기본값(720)을 바꾸지 않으면 자동으로
+  그렇게 됩니다. 박동 수·BPM·시간 지표는 해상도에 영향받지 않습니다. 형태 분석과
+  colocalization은 px 단위 결과라 축소하지 않습니다. 환경변수는 로컬에서는 `MAX_UPLOAD_MB=2048 uvicorn app.main:app`
   처럼, Render에서는 Environment 탭에 넣습니다.
 - **PIV 모드는 텍스처가 있는 영상에서만 신뢰할 수 있습니다**: 배경이 밋밋한 명시야(bright-field)
   영상(예: 저장소의 기본 `beating.mp4` 데모)에서 실제로 박동을 크게 과다검출하는 것을 확인했습니다

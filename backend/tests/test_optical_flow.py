@@ -128,3 +128,28 @@ def test_analyze_beating_optical_flow_handles_static_video():
     assert result.summary["n_beats"] == 0
     assert result.summary["mean_bpm"] is None
     json.dumps(result.summary, allow_nan=False)
+
+
+def test_optical_flow_px_units_refer_to_original_pixels_when_downscaled():
+    import cv2
+
+    fps = 30.0
+    # Slow motion (few px per frame): ContractionWave's single-level Farneback
+    # (levels=1) underestimates large per-frame displacements, so a fast
+    # synthetic would not agree across resolutions for that reason alone.
+    frames = _make_pulsing_frames(n_frames=240, fps=fps, hz=0.25, size=96, textured=True)
+    full = analyze_beating(frames, fps, signal_mode="optical_flow")
+    # Same video analysed at half size: speeds in "original px/s" should be
+    # of the same magnitude once px_per_analysis_px = 2 is given.
+    small = np.stack([cv2.resize(f, (48, 48), interpolation=cv2.INTER_AREA) for f in frames])
+    half_raw = analyze_beating(small, fps, signal_mode="optical_flow")
+    half_scaled = analyze_beating(small, fps, signal_mode="optical_flow", px_per_analysis_px=2.0)
+    mcs_full = full.summary["mean_max_contraction_speed"]
+    assert half_scaled.summary["speed_units"] == "px/s"
+    assert abs(half_scaled.summary["mean_max_contraction_speed"] - 2 * half_raw.summary["mean_max_contraction_speed"]) < 1e-9
+    # Beat detection agrees across resolutions. Absolute speeds are only
+    # loosely comparable: Farneback's response to fine speckle depends on
+    # the texture scale relative to poly_n, so speeds should be compared
+    # among videos analysed at the same MAX_FRAME_SIDE (the app's default).
+    assert half_scaled.summary["n_beats"] == full.summary["n_beats"]
+    assert 0.4 * mcs_full < half_scaled.summary["mean_max_contraction_speed"] < 2.5 * mcs_full

@@ -311,6 +311,7 @@ async def analyze_beating_endpoint(
             um_per_px=_scale_um_per_px(um_per_px, scale),
             flow_winsize=flow_winsize,
             wave_threshold_frac=wave_threshold_frac,
+            px_per_analysis_px=(1.0 / scale if scale else 1.0),
         )
         _stamp_scale(result.summary, frames, scale)
     finally:
@@ -441,7 +442,11 @@ def _analyze_one(
 ) -> dict:
     if analysis_type == "beating":
         summary = analyze_beating(
-            frames, fps, signal_mode=signal_mode, um_per_px=_scale_um_per_px(um_per_px, scale)
+            frames,
+            fps,
+            signal_mode=signal_mode,
+            um_per_px=_scale_um_per_px(um_per_px, scale),
+            px_per_analysis_px=(1.0 / scale if scale else 1.0),
         ).summary
         _stamp_scale(summary, frames, scale)
         return summary
