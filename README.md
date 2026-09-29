@@ -352,8 +352,14 @@ python tools/shrink_video.py 원본.mp4 작은클립.mp4 --seconds 5 --width 320
   Costes 자동 임계값보다 단순한 방식입니다. 두 채널이 각각 배경 대비 뚜렷하게 분리되는 경우엔
   괜찮지만, 논문에 쓸 정도로 엄밀한 비교가 필요하면 이 차이를 밝히거나 더 정교한 임계값 방법으로
   바꿔야 할 수 있습니다.
-- 업로드 용량 상한(`MAX_UPLOAD_BYTES`, 기본 300MB)과 최대 프레임 수(`MAX_FRAMES`, 기본 3000)는
-  `backend/app/config.py`에서 조정할 수 있습니다.
+- **큰 영상 처리**: 업로드 용량 상한은 파일당 기본 1 GB(`MAX_UPLOAD_MB` 환경변수), 분석 프레임
+  수는 기본 3,000(`MAX_FRAMES`)입니다. 박동·칼슘 분석은 프레임의 긴 변이 720 px(`MAX_FRAME_SIDE`,
+  0이면 끄기)를 넘으면 면적 평균(INTER_AREA)으로 자동 축소한 뒤 분석합니다 — 1920×1080·60 fps 영상을
+  원본 크기로 3,000프레임 읽으면 메모리를 수 GB 쓰기 때문입니다(축소는 노이즈도 줄여서 박동 검출에는
+  보통 이득). ROI는 원본 좌표로 그리면 자동 환산되고, `um_per_px`도 축소 배율에 맞춰 보정되며,
+  결과 요약에 `downscale_factor`와 `analysis_frame_size`가 기록됩니다. 형태 분석과 colocalization은
+  px 단위 결과라 축소하지 않습니다. 환경변수는 로컬에서는 `MAX_UPLOAD_MB=2048 uvicorn app.main:app`
+  처럼, Render에서는 Environment 탭에 넣습니다.
 - **PIV 모드는 텍스처가 있는 영상에서만 신뢰할 수 있습니다**: 배경이 밋밋한 명시야(bright-field)
   영상(예: 저장소의 기본 `beating.mp4` 데모)에서 실제로 박동을 크게 과다검출하는 것을 확인했습니다
   (참 박동 6회/60 BPM인 영상에서 15회/152 BPM로 오검출). 원인은 알고리즘 버그가 아니라 인터로게이션

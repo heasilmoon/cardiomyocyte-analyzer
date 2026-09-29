@@ -68,6 +68,7 @@ _EXCLUDED_METRICS = {
     "smoothing_window_s",
     # Recording / analysis settings, not biology.
     "fps",
+    "downscale_factor",
     "um_per_px",
     "farneback_winsize",
     "wave_threshold_frac",

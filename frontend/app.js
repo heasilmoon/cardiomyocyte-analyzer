@@ -27,6 +27,8 @@ function fieldLabel(key) {
     n_beats: "박동 수",
     fps: "프레임 속도 (fps, 초당 프레임 수)",
     n_frames: "프레임 수",
+    downscale_factor: "분석 시 축소 배율 (1 = 원본 크기)",
+    analysis_frame_size: "분석에 쓴 프레임 크기 (px)",
     duration_s: "영상 길이 (s)",
     mean_bpm: "평균 박동수 (BPM)",
     mean_inter_beat_interval_s: "평균 박동 간격 (s)",

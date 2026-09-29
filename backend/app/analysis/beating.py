@@ -80,9 +80,30 @@ class BeatingResult:
     signal_units: str | None = None
 
 
+_CHUNK_FRAMES = 128  # frames per chunk: keeps the float32 working set small for HD video
+
+
 def _consecutive_diff_signal(frames: np.ndarray) -> np.ndarray:
-    diffs = np.abs(np.diff(frames.astype(np.float32), axis=0))
-    return diffs.mean(axis=(1, 2))
+    """Mean |frame[t+1] - frame[t]| per transition, computed in chunks so a
+    long HD recording never needs a float32 copy of the whole array."""
+    n = frames.shape[0]
+    out = np.empty(max(n - 1, 0), dtype=np.float64)
+    for start in range(0, n - 1, _CHUNK_FRAMES):
+        stop = min(start + _CHUNK_FRAMES, n - 1)
+        block = frames[start : stop + 1].astype(np.float32)
+        out[start:stop] = np.abs(np.diff(block, axis=0)).mean(axis=(1, 2))
+    return out
+
+
+def _reference_diff_signal(frames: np.ndarray, reference: np.ndarray) -> np.ndarray:
+    """Mean |frame - reference| per frame, chunked like _consecutive_diff_signal."""
+    n = frames.shape[0]
+    out = np.empty(n, dtype=np.float64)
+    ref = reference.astype(np.float32)
+    for start in range(0, n, _CHUNK_FRAMES):
+        stop = min(start + _CHUNK_FRAMES, n)
+        out[start:stop] = np.abs(frames[start:stop].astype(np.float32) - ref[None, ...]).mean(axis=(1, 2))
+    return out
 
 
 def pick_reference_frame(frames: np.ndarray, fps: float = 30.0) -> int:
@@ -155,8 +176,7 @@ def compute_motion_signal(
     if reference_index is None:
         reference_index = pick_reference_frame(frames, fps=fps)
     reference_index = int(np.clip(reference_index, 0, frames.shape[0] - 1))
-    reference = frames[reference_index].astype(np.float32)
-    signal = np.abs(frames.astype(np.float32) - reference[None, ...]).mean(axis=(1, 2))
+    signal = _reference_diff_signal(frames, frames[reference_index])
     return signal, reference_index
 
 
