@@ -109,9 +109,44 @@ async def get_result_file(result_id: str, filename: str):
     return Response(content=content, media_type=media_type)
 
 
+def _running_commit() -> str | None:
+    """Short git commit of the code this server is running, so a user can
+    tell at a glance whether a deployment/pull actually picked up the
+    latest version. Render exposes RENDER_GIT_COMMIT; a local checkout is
+    read from .git; None when neither is available."""
+    env_commit = os.environ.get("RENDER_GIT_COMMIT") or os.environ.get("GIT_COMMIT")
+    if env_commit:
+        return env_commit[:7]
+    try:
+        import subprocess
+
+        repo_root = Path(__file__).resolve().parents[2]
+        out = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, timeout=3,
+        )
+        return out.stdout.strip() or None
+    except Exception:
+        return None
+
+
+RUNNING_COMMIT = _running_commit()
+RUNNING_COMMIT_DATE = None
+try:
+    import subprocess as _sp
+
+    _out = _sp.run(
+        ["git", "-C", str(Path(__file__).resolve().parents[2]), "log", "-1", "--format=%cd", "--date=short"],
+        capture_output=True, text=True, timeout=3,
+    )
+    RUNNING_COMMIT_DATE = _out.stdout.strip() or None
+except Exception:
+    RUNNING_COMMIT_DATE = None
+
+
 @app.get("/api/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "commit": RUNNING_COMMIT, "commit_date": RUNNING_COMMIT_DATE}
 
 
 def _save_upload(file: UploadFile) -> Path:

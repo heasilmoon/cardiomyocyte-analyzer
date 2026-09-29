@@ -189,3 +189,10 @@ table.compare-table th {
   background: #fff;
   cursor: pointer;
 }
+
+.app-version {
+  margin-left: 0.6rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}

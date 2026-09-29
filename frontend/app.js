@@ -797,3 +797,19 @@ document.querySelectorAll("form[data-endpoint]").forEach((form) => {
     }
   });
 });
+
+// Show which code version the backend is running (git commit + date) so a
+// stale deployment / un-pulled local checkout is obvious at a glance.
+(async () => {
+  const el = document.getElementById("app-version");
+  if (!el) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/health`);
+    const info = await res.json();
+    if (info.commit) {
+      el.textContent = `버전 ${info.commit}${info.commit_date ? ` (${info.commit_date})` : ""}`;
+    }
+  } catch (e) {
+    /* offline or old backend without version info: leave blank */
+  }
+})();

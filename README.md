@@ -220,6 +220,7 @@ Render 대시보드 → 서비스 → **Environment** 탭에서 아래 두 개�
 | `POST /api/analyze/colocalization` | `channel_a_file`, `channel_b_file`, `label_a`, `label_b` |
 | `POST /api/validate/agreement` | `file`(CSV), `column_a`, `column_b`, `label_a`, `label_b` |
 | `POST /api/preview_frame` | `file`(mp4) — 첫 프레임을 PNG로 반환 (프론트엔드 ROI 선택기용) |
+| `GET /api/health` | `{status, commit, commit_date}` — 서버가 실행 중인 코드의 git 커밋(짧은 해시)과 날짜. 화면 상단에도 "버전 …"으로 표시되므로, 그림이나 기능이 옛날 것으로 보이면 이 값이 GitHub의 최신 커밋과 같은지 먼저 확인하세요(다르면 `git pull` 또는 Render 재배포가 안 된 것). 비밀번호 보호 중에도 열려 있음 |
 
 단일 분석 엔드포인트는 `{result_id, summary, urls: {plot, csv, summary}}` 형태의 JSON을,
 `/compare`는 `{result_id, comparison, urls}` 형태를 반환합니다. `urls`는 `/results/...` 하위의
