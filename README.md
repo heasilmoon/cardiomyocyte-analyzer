@@ -101,7 +101,8 @@ Python(FastAPI + OpenCV + scikit-image) 기반으로, Fiji 전체 배포판(수�
   p-value, 위/오른쪽 축선 제거, 가는 오차막대, 흰 점, Arial 계열 글꼴(서버에 없으면 Liberation
   Sans), 그리고 검정 방법·오차막대 종류·그룹별 n을 한 줄 캡션으로 그림 아래에 적습니다. 브래킷의
   p-value는 **숫자(p = 0.0123, Prism 스타일) 또는 별표(\*, \*\*, \*\*\*, \*\*\*\*, ns)** 중 고를 수
-  있습니다(`p_style`). PNG는 300 dpi로, 같은 그림의 **SVG(글자가 텍스트로 남아 Illustrator/
+  있습니다(`p_style`). 그룹마다 **막대 색**을 폼의 색 선택기로 직접 고를 수 있고(비우면 기본
+  팔레트: 대조군 회색, 그다음 Prism 계열 분홍/청록/보라), PNG는 300 dpi로, 같은 그림의 **SVG(글자가 텍스트로 남아 Illustrator/
   Inkscape에서 편집 가능)**도 함께 저장되어 결과 화면에서 내려받을 수 있습니다. 한
   샘플(배치/웰)에서 여러 영상을 찍은 경우, 그룹별로 파일 순서대로
   배치/샘플 라벨을 넣으면 **선형 혼합효과 모델(LMM, `value ~ group + (1|sample)`)**로 샘플 ID를
@@ -214,7 +215,7 @@ Render 대시보드 → 서비스 → **Environment** 탭에서 아래 두 개�
 | `POST /api/analyze/beating` | `file`(mp4), `fps_override`, `min_bpm_gap`(선택, 비우면 자동 추정), `prominence_frac`, `signal_mode`(`reference`/`consecutive`/`piv`/`optical_flow`), `reference_index`, `piv_window_size`(기본 32px), `piv_step`(기본 window_size/2), `um_per_px`(선택, `optical_flow`용 픽셀 크기 → µm/s), `flow_winsize`(기본 15), `wave_threshold_frac`(기본 0.10), `roi_x`/`roi_y`/`roi_w`/`roi_h`(선택, 관심영역 픽셀 좌표) |
 | `POST /api/analyze/calcium` | `file`(mp4), `fps_override`, `min_transients_per_min`, `prominence_frac`, `roi_x`/`roi_y`/`roi_w`/`roi_h`(선택), `background_mode`(`none`/`auto`/`manual`), `bg_x`/`bg_y`/`bg_w`/`bg_h`(`manual`일 때, 원본 프레임 좌표) |
 | `POST /api/analyze/morphology` | `file`(mp4), `mode`(`2d`/`3d`), `min_object_size`, `separate_touching`, `separation_min_distance`, `compute_texture_alignment` |
-| `POST /api/analyze/compare` | `analysis_type`(`beating`/`calcium`/`morphology`), `morphology_mode`, `signal_mode`(박동일 때, 기본 `reference`), `um_per_px`(선택), `test_family`(`nonparametric` 기본/`parametric`), `error_bar`(`sem` 기본/`sd`), `p_style`(`value` 기본/`stars`), 그룹마다 인덱스가 붙은 필드 `group_{i}_label`, `group_{i}_files`(다중), `group_{i}_batches`(선택, 줄바꿈/쉼표로 구분된 배치 라벨) — `i`는 0부터, 그룹 2개 이상(연속 번호일 필요는 없음) |
+| `POST /api/analyze/compare` | `analysis_type`(`beating`/`calcium`/`morphology`), `morphology_mode`, `signal_mode`(박동일 때, 기본 `reference`), `um_per_px`(선택), `test_family`(`nonparametric` 기본/`parametric`), `error_bar`(`sem` 기본/`sd`), `p_style`(`value` 기본/`stars`), 그룹마다 인덱스가 붙은 필드 `group_{i}_label`, `group_{i}_files`(다중), `group_{i}_color`(선택, `#rrggbb` 막대 색), `group_{i}_batches`(선택, 줄바꿈/쉼표로 구분된 배치 라벨) — `i`는 0부터, 그룹 2개 이상(연속 번호일 필요는 없음) |
 | `POST /api/analyze/batch` | `analysis_type`, `morphology_mode`, `signal_mode`(박동일 때), `um_per_px`(선택), `files`(다중) — 영상별 결과를 CSV 하나로 |
 | `POST /api/analyze/colocalization` | `channel_a_file`, `channel_b_file`, `label_a`, `label_b` |
 | `POST /api/validate/agreement` | `file`(CSV), `column_a`, `column_b`, `label_a`, `label_b` |
