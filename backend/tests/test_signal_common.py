@@ -58,3 +58,41 @@ def test_find_local_min_between():
     signal = np.array([5, 4, 1, 3, 6, 0, 2])
     idx = find_local_min_between(signal, 0, 4)
     assert idx == 2
+
+
+def test_despike_removes_periodic_keyframe_comb_but_keeps_beats():
+    from app.analysis.signal_common import despike_single_frame
+
+    fps = 60.0
+    t = np.arange(int(50 * fps)) / fps
+    # Two real beats (multi-frame bumps) on a small noisy baseline ...
+    sig = 0.3 + 0.02 * np.random.default_rng(0).normal(size=t.size)
+    for tc in (20.0, 36.0):
+        sig += 1.7 * np.exp(-(((t - tc) / 0.12) ** 2))
+    # ... plus a single-frame spike every 30 frames (H.264 keyframe interval).
+    sig[::30] += 0.8
+    cleaned, n_spikes, periodic = despike_single_frame(sig)
+    assert periodic is True
+    assert n_spikes >= 90  # one run per keyframe (100 in 50 s)
+    # Beats survive, comb is gone.
+    assert cleaned[int(20 * fps)] > 1.5 and cleaned[int(36 * fps)] > 1.5
+    comb = np.arange(0, t.size, 30)
+    comb = comb[(np.abs(t[comb] - 20.0) > 1.0) & (np.abs(t[comb] - 36.0) > 1.0)]  # skip the real beats
+    assert np.max(np.abs(cleaned[comb] - 0.3)) < 0.15
+
+
+def test_detrend_baseline_removes_slow_drift():
+    from app.analysis.signal_common import detrend_baseline
+
+    fps = 30.0
+    t = np.arange(int(40 * fps)) / fps
+    drift = 3.0 * np.sin(2 * np.pi * t / 80.0)  # very slow
+    beats = np.zeros_like(t)
+    for tc in np.arange(1, 40, 1.0):
+        beats += np.exp(-(((t - tc) / 0.08) ** 2))
+    out = detrend_baseline(drift + beats, fps, window_s=4.0)
+    # Baseline is now flat near 0 and beats keep their height.
+    quiet = out[(t % 1.0 > 0.4) & (t % 1.0 < 0.6)]
+    # Raw quiet samples span ~6 units of drift; after detrending they sit near zero.
+    assert np.ptp(quiet) < 1.0 and np.abs(np.median(quiet)) < 0.35
+    assert out[int(10 * fps)] > 0.8

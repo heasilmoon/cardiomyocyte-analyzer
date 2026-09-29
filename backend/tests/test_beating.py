@@ -185,3 +185,24 @@ def test_low_signal_warning_flags_non_beating_noise_but_not_real_beats():
         assert ok["n_beats"] == len(beats)
         assert ok["low_signal_warning"] is False
         assert ok["periodicity_score"] > 0.4
+
+
+def test_consecutive_mode_ignores_keyframe_spikes_and_counts_real_beats():
+    # 30 fps, 40 s, two real beats and a brightness jump every 30 frames.
+    fps = 30.0
+    n = int(40 * fps)
+    rng = np.random.default_rng(1)
+    base = rng.integers(60, 200, (48, 48)).astype(np.float32)
+    frames = np.repeat(base[None], n, axis=0)
+    t = np.arange(n) / fps
+    yy, xx = np.mgrid[0:48, 0:48]
+    for i in range(n):
+        r = 12 + 6 * (np.exp(-(((t[i] - 12) / 0.15) ** 2)) + np.exp(-(((t[i] - 28) / 0.15) ** 2)))
+        mask = (xx - 24) ** 2 + (yy - 24) ** 2 <= r * r
+        frames[i] = np.where(mask, base * 0.6, base)
+    frames[::30] += 12  # keyframe-like global jump on one frame
+    frames = np.clip(frames + rng.normal(0, 2, frames.shape), 0, 255).astype(np.uint8)
+    s = analyze_beating(frames, fps, signal_mode="consecutive").summary
+    assert s["codec_artifact_warning"] is True
+    assert s["n_spikes_removed"] >= 30
+    assert s["n_beats"] <= 4  # not the 40 keyframe spikes
