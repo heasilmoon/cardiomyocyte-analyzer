@@ -51,6 +51,8 @@ from app.analysis.signal_common import (
     detect_peaks,
     estimate_dominant_period_s,
     find_local_min_between,
+    periodicity_strength,
+    signal_to_noise,
     smooth,
 )
 from app.analysis.signal_common import safe_mean as _safe_mean
@@ -187,6 +189,37 @@ def compute_motion_signal(
     return signal, reference_index
 
 
+VERY_LOW_PERIODICITY_THRESHOLD = 0.10  # no repeating structure at all
+LOW_PERIODICITY_THRESHOLD = 0.25  # weak periodicity: only a warning if the SNR is poor too
+LOW_SNR_THRESHOLD = 3.0
+
+
+def _signal_quality(summary: dict, raw: np.ndarray, smoothed: np.ndarray, fps: float, period_s: float, peaks, baseline: float) -> None:
+    """Attach beat-signal quality flags to a summary.
+
+    periodicity_score: autocorrelation at the beat period (0-1).
+    signal_to_noise: mean peak height / frame-to-frame noise.
+    low_signal_warning: True when either is poor — the detected beats are
+    then likely noise (e.g. a tissue that has stopped beating under high
+    K+), and n_beats / BPM should not be trusted.
+    """
+    per = periodicity_strength(raw, fps, period_s)
+    snr = signal_to_noise(raw, smoothed, peaks, baseline)
+    summary["periodicity_score"] = round(per, 4)
+    summary["signal_to_noise"] = round(snr, 3) if snr is not None else None
+    # Tuned on synthetic tissue: a non-beating textured field with sensor
+    # noise gives periodicity ~0.1-0.2 and SNR ~2.5 in optical_flow mode
+    # (while reporting 100+ "BPM"), whereas genuine slow/faint beating in
+    # reference mode can have periodicity ~0.12 but SNR > 20.
+    summary["low_signal_warning"] = bool(
+        len(peaks) > 0
+        and (
+            per < VERY_LOW_PERIODICITY_THRESHOLD
+            or (per < LOW_PERIODICITY_THRESHOLD and snr is not None and snr < LOW_SNR_THRESHOLD)
+        )
+    )
+
+
 _OPTICAL_FLOW_MEAN_COLUMNS = (
     "max_contraction_speed",
     "max_relaxation_speed",
@@ -263,6 +296,7 @@ def _finish_optical_flow(
     else:
         summary["max_max_contraction_speed"] = None
     summary["area_units"] = area_units
+    _signal_quality(summary, raw_signal, smoothed, fps, estimated_period_s, c_idx, waves["baseline_speed"])
 
     flow_field = None
     if len(c_idx):
@@ -449,6 +483,11 @@ def analyze_beating(
         "mean_time_to_decay_50_s": _safe_mean(beats_df["time_to_decay_50_s"]) if len(beats_df) else None,
         "mean_time_to_decay_90_s": _safe_mean(beats_df["time_to_decay_90_s"]) if len(beats_df) else None,
     }
+
+    _signal_quality(
+        summary, raw_signal, smoothed, fps, estimated_period_s, peaks,
+        float(np.mean(smoothed[troughs])) if len(troughs) else float(np.percentile(smoothed, 10)),
+    )
 
     piv_field = None
     if signal_mode == "piv":
