@@ -420,6 +420,7 @@ def analyze_beating(
             px_per_analysis_px=px_per_analysis_px,
         )
         result.summary.update(preproc)
+        _reference_fallback(result, frames, fps, prominence_frac)
         return result
 
     peaks = detect_peaks(smoothed, fps, min_bpm_gap=min_bpm_gap, prominence_frac=prominence_frac)
@@ -540,7 +541,7 @@ def analyze_beating(
         )
         piv_field["frame_index"] = strongest_peak
 
-    return BeatingResult(
+    result = BeatingResult(
         fps=fps,
         n_frames=int(frames.shape[0]),
         signal_mode=signal_mode,
@@ -554,3 +555,68 @@ def analyze_beating(
         summary=summary,
         piv_field=piv_field,
     )
+    if signal_mode in ("consecutive", "piv"):
+        _reference_fallback(result, frames, fps, prominence_frac)
+    return result
+
+
+_RHYTHM_KEYS = ("n_beats", "mean_bpm", "mean_inter_beat_interval_s", "ibi_std_s", "ibi_cv_percent")
+_OPTICAL_FLOW_UNRELIABLE_KEYS = tuple(f"mean_{c}" for c in _OPTICAL_FLOW_MEAN_COLUMNS) + (
+    "max_max_contraction_speed",
+    "n_complete_waves",
+)
+
+
+def _reference_fallback(result: BeatingResult, frames: np.ndarray, fps: float, prominence_frac: float) -> None:
+    """Rhythm metrics from the reference-frame signal when a frame-to-frame
+    signal (consecutive / piv / optical_flow) is flagged as unreliable.
+
+    Frame-to-frame signals turn sensor noise into a forest of small peaks,
+    so a tissue that has (nearly) stopped beating still gets a plausible
+    looking BPM. The reference-frame signal doesn't have that failure mode
+    (noise stays flat around the resting frame), so when low_signal_warning
+    is set we re-count beats there and report those rhythm numbers
+    instead, recording the switch in `beat_count_source`. The per-beat
+    speed/timing metrics of the flagged signal are cleared because they
+    would be measured on noise.
+    """
+    s = result.summary
+    s.setdefault("beat_count_source", result.signal_mode)
+    if not s.get("low_signal_warning"):
+        return
+    try:
+        ref = analyze_beating(frames, fps, prominence_frac=prominence_frac, signal_mode="reference")
+    except Exception:
+        return
+    rs = ref.summary
+    ref_ok = not rs.get("low_signal_warning")
+    use_ref = ref_ok or (rs.get("n_beats", 0) < s.get("n_beats", 0))
+    if not use_ref:
+        return
+    for k in _RHYTHM_KEYS:
+        s[k] = rs.get(k)
+    s["beat_count_source"] = "reference (fallback)"
+    s["fallback_reference_periodicity_score"] = rs.get("periodicity_score")
+    s["fallback_reference_signal_to_noise"] = rs.get("signal_to_noise")
+    if result.signal_mode == "optical_flow":
+        for k in _OPTICAL_FLOW_UNRELIABLE_KEYS:
+            if k in s:
+                s[k] = None
+        s["optical_flow_metrics_suppressed"] = True
+    else:
+        for k in (
+            "mean_amplitude",
+            "amplitude_cv_percent",
+            "mean_contraction_time_s",
+            "mean_relaxation_time_s",
+            "mean_max_contraction_velocity",
+            "mean_max_relaxation_velocity",
+            "mean_time_to_decay_10_s",
+            "mean_time_to_decay_50_s",
+            "mean_time_to_decay_90_s",
+        ):
+            if k in s:
+                s[k] = None
+    # Keep the warning visible in the (still-plotted) flagged signal, but
+    # the rhythm numbers are now trustworthy to the extent reference is.
+    s["low_signal_warning"] = not ref_ok

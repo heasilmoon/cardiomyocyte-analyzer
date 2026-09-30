@@ -37,6 +37,10 @@ function fieldLabel(key) {
     periodicity_score: "주기성 점수 (0–1, 박동 주기의 자기상관)",
     signal_to_noise: "신호/노이즈 비 (봉우리 높이 ÷ 프레임 노이즈)",
     low_signal_warning: "신호 약함/주기성 없음 경고",
+    beat_count_source: "박동 수·BPM의 출처",
+    fallback_reference_periodicity_score: "대체 계산(reference) 주기성 점수",
+    fallback_reference_signal_to_noise: "대체 계산(reference) 신호/노이즈 비",
+    optical_flow_metrics_suppressed: "광류 속도·시간 지표 무효화됨 (신호 불량)",
     analysis_frame_size: "분석에 쓴 프레임 크기 (px)",
     duration_s: "영상 길이 (s)",
     mean_bpm: "평균 박동수 (BPM)",
@@ -203,6 +207,15 @@ function renderResults(container, data) {
       </div>`
     : "";
 
+  const fallbackNote =
+    summary.beat_count_source && String(summary.beat_count_source).startsWith("reference (fallback")
+      ? `<div class="warning-banner">
+        ℹ️ 이 영상의 ${summary.signal_mode} 신호는 노이즈 수준이라 박동을 믿을 수 없어서, <b>박동 수·BPM·박동 간격은 reference 신호로 다시 세어</b> 표시했습니다
+        (박동 ${summary.n_beats}개, ${formatValue(summary.mean_bpm)} BPM). 속도·시간 지표는 노이즈 위에서 잰 값이라 비워 두었습니다.
+        거의 안 뛰는 조건이면 이대로 기록하고, 약하게 뛰는 조건이면 ROI를 지정해 다시 분석해 보세요.
+      </div>`
+      : "";
+
   const codecWarning = summary.codec_artifact_warning
     ? `<div class="warning-banner">
         ℹ️ 일정한 간격의 1프레임 스파이크 ${summary.n_spikes_removed}개를 제거했습니다. 재인코딩된 영상의 키프레임(코덱) 흔적으로 보이며,
@@ -212,6 +225,7 @@ function renderResults(container, data) {
 
   container.innerHTML = `
     ${truncWarning}
+    ${fallbackNote}
     ${lowSignalWarning}
     ${codecWarning}
     ${pivWarning}
