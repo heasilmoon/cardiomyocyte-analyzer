@@ -61,6 +61,7 @@ from app.analysis.signal_common import safe_mean as _safe_mean
 from app.analysis.signal_common import time_to_decay as _time_to_decay
 
 SignalMode = Literal["reference", "consecutive", "piv", "optical_flow"]
+BeatCountMode = Literal["auto", "reference", "self"]
 
 
 @dataclass
@@ -253,6 +254,7 @@ def _finish_optical_flow(
     um_per_px: float | None,
     flow_winsize: int,
     px_per_analysis_px: float = 1.0,
+    anchors: np.ndarray | None = None,
 ) -> BeatingResult:
     """ContractionWave-style wave analysis of the optical-flow speed curve."""
     waves = analyze_speed_waves(
@@ -262,6 +264,7 @@ def _finish_optical_flow(
         period_s=estimated_period_s,
         prominence_frac=prominence_frac,
         threshold_frac=wave_threshold_frac,
+        anchors=anchors,
     )
     beats_df: pd.DataFrame = waves["cycles_df"]
     c_idx: np.ndarray = waves["contraction_idx"]
@@ -349,12 +352,27 @@ def analyze_beating(
     flow_winsize: int = FARNEBACK_DEFAULTS["winsize"],
     wave_threshold_frac: float = 0.10,
     px_per_analysis_px: float = 1.0,
+    beat_count_mode: BeatCountMode = "auto",
 ) -> BeatingResult:
     """um_per_px, flow_winsize and wave_threshold_frac only matter in
     "optical_flow" mode: pixel size (µm) turns speeds into µm/s, flow_winsize
     is the Farneback averaging window, and wave_threshold_frac is how far
     above baseline (as a fraction of the signal range) a wave must rise to
-    count as started/ended."""
+    count as started/ended.
+
+    beat_count_mode (frame-to-frame modes only):
+      "auto"      count beats on the chosen signal; fall back to the
+                  reference-frame signal when the quality check flags it
+      "reference" always locate beats on the reference-frame signal (which
+                  doesn't turn noise into peaks) and measure the speed /
+                  timing metrics around those beats on the chosen signal
+      "self"      never fall back
+    """
+    ref_result: BeatingResult | None = None
+    if beat_count_mode == "reference" and signal_mode in ("consecutive", "piv", "optical_flow"):
+        ref_result = analyze_beating(
+            frames, fps, min_bpm_gap=min_bpm_gap, prominence_frac=prominence_frac, signal_mode="reference"
+        )
     raw_signal, used_reference_index = compute_motion_signal(
         frames,
         mode=signal_mode,
@@ -404,6 +422,10 @@ def analyze_beating(
 
     smoothed = smooth(raw_signal, fps, window_seconds=smoothing_window_s)
 
+    anchors_override = None
+    if ref_result is not None:
+        anchors_override = _map_reference_peaks(ref_result.peak_indices, smoothed, fps, estimated_period_s)
+
     if signal_mode == "optical_flow":
         result = _finish_optical_flow(
             frames,
@@ -418,12 +440,21 @@ def analyze_beating(
             um_per_px=um_per_px,
             flow_winsize=flow_winsize,
             px_per_analysis_px=px_per_analysis_px,
+            anchors=anchors_override,
         )
         result.summary.update(preproc)
-        _reference_fallback(result, frames, fps, prominence_frac)
+        if ref_result is not None:
+            _adopt_reference_rhythm(result, ref_result)
+        elif beat_count_mode == "auto":
+            _reference_fallback(result, frames, fps, prominence_frac)
+        else:
+            result.summary.setdefault("beat_count_source", result.signal_mode)
         return result
 
-    peaks = detect_peaks(smoothed, fps, min_bpm_gap=min_bpm_gap, prominence_frac=prominence_frac)
+    if anchors_override is not None:
+        peaks = anchors_override
+    else:
+        peaks = detect_peaks(smoothed, fps, min_bpm_gap=min_bpm_gap, prominence_frac=prominence_frac)
 
     troughs = []
     for i, peak in enumerate(peaks):
@@ -556,8 +587,44 @@ def analyze_beating(
         piv_field=piv_field,
     )
     if signal_mode in ("consecutive", "piv"):
-        _reference_fallback(result, frames, fps, prominence_frac)
+        if ref_result is not None:
+            _adopt_reference_rhythm(result, ref_result)
+        elif beat_count_mode == "auto":
+            _reference_fallback(result, frames, fps, prominence_frac)
+        else:
+            result.summary.setdefault("beat_count_source", result.signal_mode)
+    else:
+        result.summary.setdefault("beat_count_source", result.signal_mode)
     return result
+
+
+def _map_reference_peaks(ref_peaks, speed_smoothed: np.ndarray, fps: float, period_s: float) -> np.ndarray:
+    """Turn beat peaks found on the reference-frame signal (index = frame)
+    into anchors on a frame-to-frame signal (index = transition): the
+    largest speed within +/- 0.3 period of each reference peak."""
+    n = len(speed_smoothed)
+    w = max(2, int(round(0.3 * period_s * fps)))
+    out = []
+    for p in np.asarray(ref_peaks, dtype=int):
+        lo, hi = max(0, p - w), min(n - 1, p + w)
+        if hi < lo:
+            continue
+        out.append(lo + int(np.argmax(speed_smoothed[lo : hi + 1])))
+    return np.unique(np.asarray(out, dtype=int))
+
+
+def _adopt_reference_rhythm(result: BeatingResult, ref: BeatingResult) -> None:
+    """beat_count_mode="reference": rhythm numbers come from the reference
+    signal; the chosen signal keeps its per-beat metrics measured at the
+    reference-located beats."""
+    s, rs = result.summary, ref.summary
+    for k in _RHYTHM_KEYS:
+        s[k] = rs.get(k)
+    s["beat_count_source"] = "reference"
+    s["fallback_reference_periodicity_score"] = rs.get("periodicity_score")
+    s["fallback_reference_signal_to_noise"] = rs.get("signal_to_noise")
+    # The quality flag now describes the reference count.
+    s["low_signal_warning"] = bool(rs.get("low_signal_warning"))
 
 
 _RHYTHM_KEYS = ("n_beats", "mean_bpm", "mean_inter_beat_interval_s", "ibi_std_s", "ibi_cv_percent")

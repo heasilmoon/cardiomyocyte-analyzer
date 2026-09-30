@@ -37,6 +37,10 @@ Python(FastAPI + OpenCV + scikit-image) 기반으로, Fiji 전체 배포판(수�
   `beat_count_source: "reference (fallback)"`). 기준 프레임 대비 차이 신호는 노이즈가 봉우리로
   쌓이지 않아 "거의 안 뛰는" 조건에서 훨씬 안전하기 때문입니다. 이때 노이즈 위에서 잰 속도·시간
   지표는 비워집니다(`optical_flow_metrics_suppressed: true`). 두 신호 모두 불량이면 경고가 유지됩니다.
+  이 동작은 `beat_count_mode`로 고를 수 있습니다: `auto`(기본, 위 설명), **`reference`(항상 reference
+  신호에서 박동을 찾고, 그 박동 위치에서 선택한 신호의 속도·시간 지표를 측정 — 정지·저속 조건이 섞인
+  실험에서 박동 수를 가장 안정적으로 세는 방법)**, `self`(대체 없음). 박동 분석·배치·그룹 비교 폼
+  모두에 "박동 수 세는 기준"으로 있습니다.
   또한 PIVlab처럼 반복적인 윈도우 변형/다단계(multi-pass) 정제는 하지 않는 단일 패스 구현이라 큰
   변위나 미세 구조에는 PIVlab만큼 정확하지 않을 수 있습니다. **PIV는 `reference`/`consecutive`보다
   훨씬 느립니다** — 프레임마다 격자 전체를 FFT 교차상관하기 때문입니다. 대략 640×480/30fps/10초

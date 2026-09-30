@@ -61,6 +61,14 @@
             <label>피크 민감도 (0-1)</label>
             <input type="number" name="prominence_frac" value="0.15" step="0.01" min="0" max="1" />
           </div>
+          <div class="field beat-count-mode-field">
+            <label>박동 수 세는 기준</label>
+            <select name="beat_count_mode">
+              <option value="auto">자동 (신호 불량이면 reference로 대체)</option>
+              <option value="reference">항상 reference로 세기 (속도·시간 지표는 선택 방식으로)</option>
+              <option value="self">선택 방식 그대로</option>
+            </select>
+          </div>
         </div>
         <div class="form-row" id="beating-piv-fields" style="display:none;">
           <div class="field">
@@ -259,6 +267,14 @@
             <label>픽셀 크기 (µm/px, optical_flow용, 선택)</label>
             <input type="number" name="um_per_px" step="0.001" min="0" placeholder="비우면 px/s" />
           </div>
+          <div class="field beating-mode-field">
+            <label>박동 수 세는 기준</label>
+            <select name="beat_count_mode">
+              <option value="auto">자동 (신호 불량이면 reference로 대체)</option>
+              <option value="reference">항상 reference로 세기</option>
+              <option value="self">선택 방식 그대로</option>
+            </select>
+          </div>
           <div class="field">
             <label>통계 검정</label>
             <select name="test_family">
@@ -348,6 +364,14 @@
           <div class="field beating-mode-field">
             <label>픽셀 크기 (µm/px, optical_flow용, 선택)</label>
             <input type="number" name="um_per_px" step="0.001" min="0" placeholder="비우면 px/s" />
+          </div>
+          <div class="field beating-mode-field">
+            <label>박동 수 세는 기준</label>
+            <select name="beat_count_mode">
+              <option value="auto">자동 (신호 불량이면 reference로 대체)</option>
+              <option value="reference">항상 reference로 세기</option>
+              <option value="self">선택 방식 그대로</option>
+            </select>
           </div>
           <div class="field">
             <label>영상 파일 (여러 개 선택)</label>

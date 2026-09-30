@@ -235,3 +235,22 @@ def test_optical_flow_falls_back_to_reference_count_on_noise_only_video():
     assert ok["beat_count_source"] == "optical_flow"
     assert ok["n_beats"] == len(beats)
     assert ok["mean_max_contraction_speed"] is not None
+
+
+def test_beat_count_mode_reference_uses_reference_beats_for_optical_flow():
+    from benchmarks.beating_accuracy import base_tissue_image, render_video
+
+    rng = np.random.default_rng(2)
+    frames, beats = render_video(60, 30, 5, 1.0, 0)
+    s = analyze_beating(frames, 30.0, signal_mode="optical_flow", beat_count_mode="reference").summary
+    assert s["beat_count_source"] == "reference"
+    assert s["n_beats"] == len(beats)
+    # Speed metrics are still measured (on the optical-flow signal, at the reference beats).
+    assert s["mean_max_contraction_speed"] is not None and s["mean_max_contraction_speed"] > 0
+
+    base = base_tissue_image(rng, 1.0)
+    static = np.clip(base[None] + rng.normal(0, 5, (300, *base.shape)), 0, 255).astype(np.uint8)
+    s2 = analyze_beating(static, 30.0, signal_mode="optical_flow", beat_count_mode="reference").summary
+    assert s2["n_beats"] <= 2
+    s3 = analyze_beating(static, 30.0, signal_mode="optical_flow", beat_count_mode="self").summary
+    assert s3["beat_count_source"] == "optical_flow" and s3["n_beats"] > 5
