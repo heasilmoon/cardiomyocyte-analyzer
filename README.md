@@ -157,9 +157,31 @@ frontend/  바닐라 HTML/CSS/JS 단일 페이지 (빌드 도구 불필요, 백�
 
 ## 빠른 시작
 
+### 새 컴퓨터에 설치하기 (더블클릭 실행)
+
+1. **Python** 설치: https://www.python.org/downloads/ (3.11 이상). Windows에서는 설치 화면의
+   "Add python.exe to PATH"를 꼭 체크하세요. Mac은 python.org 설치 파일 또는 `brew install python`.
+2. **Git** 설치: Mac은 터미널에서 `xcode-select --install`, Windows는 https://git-scm.com/download/win
+   (기본 옵션으로 설치).
+3. 저장소 받기: 터미널(Windows는 PowerShell)에서
+   ```bash
+   git clone https://github.com/heasilmoon/cardiomyocyte-analyzer.git
+   ```
+   (git이 싫으면 GitHub 페이지의 "Code → Download ZIP"으로 받아 압축을 풀어도 됩니다. 이 경우
+   자동 업데이트만 안 됩니다.)
+4. 폴더 안의 **`run_mac.command`**(Mac) 또는 **`run_windows.bat`**(Windows)를 더블클릭하세요.
+   처음 한 번은 가상환경을 만들고 패키지를 설치하느라 몇 분 걸리고, 그 뒤로는 실행할 때마다
+   최신 코드를 받아(`git pull`) 서버를 켜고 브라우저에서 `http://localhost:8000`을 엽니다.
+   창을 닫으면 서버가 꺼집니다.
+   - Mac에서 "확인되지 않은 개발자" 경고가 뜨면: 파일을 오른쪽 클릭 → 열기. 그래도 안 되면
+     터미널에서 `chmod +x run_mac.command` 한 번.
+   - Windows SmartScreen 경고가 뜨면 "추가 정보 → 실행".
+
+### 터미널로 직접 실행
+
 ```bash
 cd backend
-python3 -m venv .venv && source .venv/bin/activate
+python3 -m venv .venv && source .venv/bin/activate   # Windows: py -3 -m venv .venv && .venv\Scripts\activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
