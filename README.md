@@ -31,8 +31,12 @@ Python(FastAPI + OpenCV + scikit-image) 기반으로, Fiji 전체 배포판(수�
   모든 모드에서 **신호 품질 진단**도 같이 나옵니다: `periodicity_score`(추정 박동 주기에서의
   자기상관, 0–1)와 `signal_to_noise`(봉우리 높이 ÷ 프레임 간 노이즈). 주기성이 0.25 미만이거나
   신호/노이즈가 3 미만이면 `low_signal_warning: true`와 함께 화면에 경고가 떠요 — 고칼륨처럼 거의
-  안 뛰는 조직에서 노이즈 봉우리를 박동으로 세어 BPM이 부풀려지는 경우를 잡기 위한 것입니다. 이때는
-  박동 수·BPM을 그대로 쓰지 말고 영상을 확인하세요.
+  안 뛰는 조직에서 노이즈 봉우리를 박동으로 세어 BPM이 부풀려지는 경우를 잡기 위한 것입니다.
+  프레임 간 방식(`consecutive`/`piv`/`optical_flow`)에서 이 경고가 뜨면 앱이 **같은 영상을
+  `reference` 신호로 다시 세어 박동 수·BPM·박동 간격을 그 값으로 바꿔** 보고합니다(요약의
+  `beat_count_source: "reference (fallback)"`). 기준 프레임 대비 차이 신호는 노이즈가 봉우리로
+  쌓이지 않아 "거의 안 뛰는" 조건에서 훨씬 안전하기 때문입니다. 이때 노이즈 위에서 잰 속도·시간
+  지표는 비워집니다(`optical_flow_metrics_suppressed: true`). 두 신호 모두 불량이면 경고가 유지됩니다.
   또한 PIVlab처럼 반복적인 윈도우 변형/다단계(multi-pass) 정제는 하지 않는 단일 패스 구현이라 큰
   변위나 미세 구조에는 PIVlab만큼 정확하지 않을 수 있습니다. **PIV는 `reference`/`consecutive`보다
   훨씬 느립니다** — 프레임마다 격자 전체를 FFT 교차상관하기 때문입니다. 대략 640×480/30fps/10초

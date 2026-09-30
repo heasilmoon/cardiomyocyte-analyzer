@@ -174,10 +174,11 @@ def test_low_signal_warning_flags_non_beating_noise_but_not_real_beats():
     base = base_tissue_image(rng, 1.0)
     static = np.clip(base[None] + rng.normal(0, 5, (300, *base.shape)), 0, 255).astype(np.uint8)
     s = analyze_beating(static, 30.0, signal_mode="optical_flow").summary
-    # Optical flow on pure sensor noise still "finds" many beats — the QC flag must catch it.
-    assert s["n_beats"] > 5
-    assert s["low_signal_warning"] is True
+    # Optical flow on pure sensor noise "finds" many beats; the QC flag must
+    # catch it and the rhythm numbers then come from the reference fallback.
     assert s["periodicity_score"] < 0.25
+    assert s["beat_count_source"].startswith("reference")
+    assert s["n_beats"] <= 2
 
     frames, beats = render_video(60, 30, 0, 1.0, 0)
     for mode in ("reference", "optical_flow"):
@@ -215,3 +216,22 @@ def test_non_beating_video_reports_zero_bpm_not_none():
         assert s["n_beats"] == 0
         assert s["mean_bpm"] == 0.0
         assert s["mean_inter_beat_interval_s"] is None
+
+
+def test_optical_flow_falls_back_to_reference_count_on_noise_only_video():
+    from benchmarks.beating_accuracy import base_tissue_image, render_video
+
+    rng = np.random.default_rng(0)
+    base = base_tissue_image(rng, 1.0)
+    static = np.clip(base[None] + rng.normal(0, 5, (300, *base.shape)), 0, 255).astype(np.uint8)
+    s = analyze_beating(static, 30.0, signal_mode="optical_flow").summary
+    assert s["beat_count_source"].startswith("reference")
+    assert s["n_beats"] <= 2 and s["mean_bpm"] < 15
+    assert s["optical_flow_metrics_suppressed"] is True
+    assert s["mean_max_contraction_speed"] is None
+
+    frames, beats = render_video(60, 30, 0, 1.0, 0)
+    ok = analyze_beating(frames, 30.0, signal_mode="optical_flow").summary
+    assert ok["beat_count_source"] == "optical_flow"
+    assert ok["n_beats"] == len(beats)
+    assert ok["mean_max_contraction_speed"] is not None
