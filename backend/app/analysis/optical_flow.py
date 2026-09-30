@@ -200,8 +200,14 @@ def analyze_speed_waves(
     period_s: float,
     prominence_frac: float = 0.15,
     threshold_frac: float = 0.10,
+    anchors: np.ndarray | None = None,
 ) -> dict:
     """ContractionWave-style wave analysis of a (smoothed) speed signal.
+
+    anchors: optional beat anchor indices (one per beat, in this signal's
+    index space) to use instead of detecting them here — e.g. beats found
+    on the reference-frame signal, when the speed signal itself is too
+    noisy to count beats on.
 
     Returns a dict with per-beat rows (cycles) and the index arrays used
     for plotting: contraction peaks, relaxation peaks, wave starts, ends.
@@ -217,9 +223,12 @@ def analyze_speed_waves(
     # period-derived spacing rule as the other signal modes so beat counts
     # stay comparable across modes.
     anchor_gap_bpm = float(np.clip(100.0 / period_s, 30.0, 400.0))
-    anchors = np.asarray(
-        detect_peaks(speed, fps, min_bpm_gap=anchor_gap_bpm, prominence_frac=prominence_frac), dtype=int
-    )
+    if anchors is None:
+        anchors = np.asarray(
+            detect_peaks(speed, fps, min_bpm_gap=anchor_gap_bpm, prominence_frac=prominence_frac), dtype=int
+        )
+    else:
+        anchors = np.unique(np.clip(np.asarray(anchors, dtype=int), 0, n - 1))
     # Stroke peaks: finer spacing so both strokes of a beat can be found
     # (they are usually >= ~15 % of a period apart).
     stroke_gap_bpm = 60.0 * fps / max(0.15 * period_frames, 1.0)

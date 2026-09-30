@@ -37,7 +37,7 @@ function fieldLabel(key) {
     periodicity_score: "주기성 점수 (0–1, 박동 주기의 자기상관)",
     signal_to_noise: "신호/노이즈 비 (봉우리 높이 ÷ 프레임 노이즈)",
     low_signal_warning: "신호 약함/주기성 없음 경고",
-    beat_count_source: "박동 수·BPM의 출처",
+    beat_count_source: "박동 수·BPM의 출처 (신호)",
     fallback_reference_periodicity_score: "대체 계산(reference) 주기성 점수",
     fallback_reference_signal_to_noise: "대체 계산(reference) 신호/노이즈 비",
     optical_flow_metrics_suppressed: "광류 속도·시간 지표 무효화됨 (신호 불량)",
@@ -207,6 +207,10 @@ function renderResults(container, data) {
       </div>`
     : "";
 
+  const refCountNote =
+    summary.beat_count_source === "reference" && summary.signal_mode !== "reference"
+      ? `<p class="roi-applied-note">박동 수·BPM·박동 간격은 reference 신호에서 세었고, 속도·시간 지표는 그 박동 위치에서 ${summary.signal_mode} 신호로 쟀습니다.</p>`
+      : "";
   const fallbackNote =
     summary.beat_count_source && String(summary.beat_count_source).startsWith("reference (fallback")
       ? `<div class="warning-banner">
@@ -226,6 +230,7 @@ function renderResults(container, data) {
   container.innerHTML = `
     ${truncWarning}
     ${fallbackNote}
+    ${refCountNote}
     ${lowSignalWarning}
     ${codecWarning}
     ${pivWarning}
@@ -248,6 +253,10 @@ if (beatingSignalMode) {
     if (beatingFlowFields) {
       beatingFlowFields.style.display = beatingSignalMode.value === "optical_flow" ? "" : "none";
     }
+    // Beat-count source only matters for frame-to-frame signals.
+    document.querySelectorAll("#panel-beating .beat-count-mode-field").forEach((el) => {
+      el.style.display = beatingSignalMode.value === "reference" ? "none" : "";
+    });
   };
   beatingSignalMode.addEventListener("change", syncPivFieldsVisibility);
   syncPivFieldsVisibility();
