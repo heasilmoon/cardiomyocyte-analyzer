@@ -205,6 +205,23 @@ docker build -f backend/Dockerfile -t cardiomyocyte-analyzer .
 docker run -p 8000:8000 cardiomyocyte-analyzer
 ```
 
+### GitHub에서 바로 실행하기 — Codespaces (설치 없음, 개인용)
+
+GitHub Pages는 정적 페이지만 호스팅해서 이 앱(Python 서버가 영상을 계산)을 돌릴 수 없지만,
+**GitHub Codespaces**는 됩니다: GitHub가 클라우드에 2코어·8 GB 컴퓨터를 띄워 주고, 이
+저장소의 `.devcontainer` 설정이 패키지 설치와 서버 시작을 자동으로 합니다.
+
+1. 저장소 페이지 → 초록색 **Code** 버튼 → **Codespaces** 탭 → **Create codespace on main**.
+2. 처음엔 2~3분 뒤 브라우저 안에 VS Code 화면이 뜨고, 서버가 자동으로 켜지면서 앱 탭이
+   열립니다(안 열리면 아래쪽 **PORTS** 탭에서 8000 포트의 지구본 아이콘 클릭).
+3. 다 쓰면 그냥 창을 닫으면 됩니다. 30분 동안 안 쓰면 자동으로 멈추고, 다시 **Code →
+   Codespaces**에서 이름을 눌러 이어서 씁니다. 결과 파일은 Codespace 안에 남아 있습니다.
+
+무료 계정은 월 120 코어-시간(2코어 기준 60시간)이 무료라 개인 분석용으로는 충분하고, 랩 전체가
+같은 주소로 쓰는 용도(그건 아래 Spaces)에는 맞지 않습니다. 앱 주소를 다른 사람에게 주려면
+PORTS 탭에서 8000 포트를 오른쪽 클릭 → Port Visibility → Public으로 바꾸면 되지만, Codespace가
+켜져 있는 동안만 열립니다.
+
 ### 터미널 없이 인터넷에 올리기 — Hugging Face Spaces (권장)
 
 Render 무료 플랜은 메모리 512 MB·디스크 몇 GB라 HD 영상(1080p·60 fps)을 여러 개 올리면 "저장공간
