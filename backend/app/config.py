@@ -32,3 +32,11 @@ def _env_int(name: str, default: int) -> int:
 MAX_UPLOAD_BYTES = _env_int("MAX_UPLOAD_MB", 1024) * 1024 * 1024
 MAX_FRAMES = _env_int("MAX_FRAMES", 3000)
 MAX_FRAME_SIDE = _env_int("MAX_FRAME_SIDE", 720)
+
+# Local result files (plots, CSV, JSON) are pruned oldest-first once they
+# exceed this total, so a small hosted disk (Render / Hugging Face Spaces)
+# never fills up. Results mirrored to Supabase are unaffected. 0 disables.
+RESULTS_MAX_BYTES = _env_int("RESULTS_MAX_MB", 500) * 1024 * 1024
+# Refuse an upload (with a clear message) when the disk has less free space
+# than the file plus this margin, instead of crashing mid-write.
+MIN_FREE_DISK_BYTES = _env_int("MIN_FREE_DISK_MB", 200) * 1024 * 1024

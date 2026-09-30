@@ -7,6 +7,7 @@ import mimetypes
 import os
 import re
 import secrets
+import shutil
 import uuid
 from pathlib import Path
 from typing import Literal
@@ -27,7 +28,16 @@ from app.analysis.colocalization import analyze_colocalization
 from app.analysis.group_stats import GroupInput, compare_grouped, compare_groups
 from app.analysis.morphology import analyze_morphology_2d, analyze_morphology_3d
 from app.analysis.validation_stats import compute_agreement
-from app.config import FRONTEND_DIR, MAX_FRAME_SIDE, MAX_FRAMES, MAX_UPLOAD_BYTES, RESULTS_DIR, UPLOADS_DIR
+from app.config import (
+    FRONTEND_DIR,
+    MAX_FRAME_SIDE,
+    MAX_FRAMES,
+    MAX_UPLOAD_BYTES,
+    MIN_FREE_DISK_BYTES,
+    RESULTS_DIR,
+    RESULTS_MAX_BYTES,
+    UPLOADS_DIR,
+)
 from app.utils import result_storage
 from app.utils.video_io import VideoLoadError, extract_first_frame_png, read_video_frames_scaled
 
@@ -149,24 +159,88 @@ def health():
     return {"status": "ok", "commit": RUNNING_COMMIT, "commit_date": RUNNING_COMMIT_DATE}
 
 
+def _dir_size(path: Path) -> int:
+    return sum(p.stat().st_size for p in path.rglob("*") if p.is_file())
+
+
+def _prune_results(max_bytes: int = RESULTS_MAX_BYTES, results_dir: Path = RESULTS_DIR) -> int:
+    """Delete the oldest local result folders until the total is under the
+    cap. Returns the number of folders removed. Hosted free tiers have a
+    few hundred MB to a few GB of ephemeral disk; without this, a season of
+    300-dpi figures and CSVs eventually fills it and every upload fails."""
+    if not max_bytes or not results_dir.exists():
+        return 0
+    dirs = [d for d in results_dir.iterdir() if d.is_dir()]
+    sizes = {d: _dir_size(d) for d in dirs}
+    total = sum(sizes.values())
+    removed = 0
+    for d in sorted(dirs, key=lambda p: p.stat().st_mtime):
+        if total <= max_bytes:
+            break
+        shutil.rmtree(d, ignore_errors=True)
+        total -= sizes[d]
+        removed += 1
+    return removed
+
+
+def _clear_stale_uploads() -> None:
+    """Uploads are deleted right after analysis; anything left over is from
+    a crash or restart mid-analysis and just wastes disk."""
+    for p in UPLOADS_DIR.glob("*"):
+        try:
+            p.unlink()
+        except OSError:
+            pass
+
+
+_clear_stale_uploads()
+_prune_results()
+
+
+def _free_disk_bytes(path: Path) -> int:
+    try:
+        return shutil.disk_usage(str(path)).free
+    except OSError:
+        return 1 << 62
+
+
 def _save_upload(file: UploadFile) -> Path:
     suffix = Path(file.filename or "upload.mp4").suffix or ".mp4"
     dest = UPLOADS_DIR / f"{uuid.uuid4().hex}{suffix}"
+    # Make room first: old result folders are the only thing we can shed.
+    _prune_results()
+    declared = getattr(file, "size", None) or 0
+    if _free_disk_bytes(UPLOADS_DIR) < declared + MIN_FREE_DISK_BYTES:
+        raise HTTPException(
+            status_code=507,
+            detail=(
+                "Server disk is full (not enough free space for this upload). "
+                "Old results were already pruned; try a shorter clip (tools/shrink_video.py), "
+                "or lower RESULTS_MAX_MB / move to a host with more disk (see README: Hugging Face Spaces)."
+            ),
+        )
     size = 0
-    with dest.open("wb") as out:
-        while chunk := file.file.read(1024 * 1024):
-            size += len(chunk)
-            if size > MAX_UPLOAD_BYTES:
-                dest.unlink(missing_ok=True)
-                raise HTTPException(
-                    status_code=413,
-                    detail=(
-                        f"File exceeds max upload size of {MAX_UPLOAD_BYTES // (1024 * 1024)} MB "
-                        "(raise it with the MAX_UPLOAD_MB environment variable, or trim the clip "
-                        "with tools/shrink_video.py)"
-                    ),
-                )
-            out.write(chunk)
+    try:
+        with dest.open("wb") as out:
+            while chunk := file.file.read(1024 * 1024):
+                size += len(chunk)
+                if size > MAX_UPLOAD_BYTES:
+                    dest.unlink(missing_ok=True)
+                    raise HTTPException(
+                        status_code=413,
+                        detail=(
+                            f"File exceeds max upload size of {MAX_UPLOAD_BYTES // (1024 * 1024)} MB "
+                            "(raise it with the MAX_UPLOAD_MB environment variable, or trim the clip "
+                            "with tools/shrink_video.py)"
+                        ),
+                    )
+                out.write(chunk)
+    except OSError as exc:  # e.g. ENOSPC mid-write
+        dest.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=507,
+            detail=f"Server disk is full while saving the upload ({exc.strerror}). Try a shorter clip or a host with more disk.",
+        ) from exc
     return dest
 
 

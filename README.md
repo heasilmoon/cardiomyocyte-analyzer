@@ -1,3 +1,13 @@
+---
+title: Cardiomyocyte Analyzer
+emoji: 🫀
+colorFrom: red
+colorTo: gray
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # Cardiomyocyte Analyzer
 
 Fiji/ImageJ 없이 심근세포(cardiomyocyte) 2D/3D 현미경 영상(mp4)을 분석하는 가벼운 웹 앱입니다.
@@ -194,6 +204,38 @@ uvicorn app.main:app --reload --port 8000
 docker build -f backend/Dockerfile -t cardiomyocyte-analyzer .
 docker run -p 8000:8000 cardiomyocyte-analyzer
 ```
+
+### 터미널 없이 인터넷에 올리기 — Hugging Face Spaces (권장)
+
+Render 무료 플랜은 메모리 512 MB·디스크 몇 GB라 HD 영상(1080p·60 fps)을 여러 개 올리면 "저장공간
+부족"이나 메모리 초과로 멈춥니다. **Hugging Face Spaces 무료 CPU**는 메모리 16 GB·디스크 50 GB라
+이 앱에 훨씬 맞고, 아래 설정은 전부 브라우저에서 합니다. 한 번 해두면 GitHub에 코드가 올라갈
+때마다 자동으로 다시 배포됩니다.
+
+1. https://huggingface.co 가입 → 오른쪽 위 프로필 → **New Space**. 이름 입력, **SDK: Docker →
+   Blank**, Visibility는 Private(로그인한 사람만) 또는 Public(아무나, 대신 아래 비밀번호 설정)으로
+   만들기.
+2. https://huggingface.co/settings/tokens → **New token** → Type **Write** → 토큰 문자열 복사.
+3. GitHub 저장소(`heasilmoon/cardiomyocyte-analyzer`) → **Settings → Secrets and variables →
+   Actions**:
+   - **Secrets** 탭 → New repository secret: 이름 `HF_TOKEN`, 값 = 2번 토큰
+   - **Variables** 탭 → New repository variable: 이름 `HF_SPACE`, 값 = `내HF아이디/스페이스이름`
+     (예: `heasilmoon/cardiomyocyte-analyzer`)
+4. GitHub 저장소의 **Actions** 탭 → "Sync to Hugging Face Space" → **Run workflow**. 1~2분 뒤
+   Space 페이지에서 빌드가 돌고(첫 빌드 5~10분), 끝나면 앱이 열립니다. 주소는
+   `https://huggingface.co/spaces/<아이디>/<이름>` 이고, 앱만 전체 화면으로 쓰려면
+   `https://<아이디>-<이름>.hf.space` 입니다.
+5. 비밀번호·Supabase·상한값은 Space 페이지 **Settings → Variables and secrets**에 넣습니다
+   (Render의 Environment와 같은 역할): `APP_PASSWORD`(Secret), `SUPABASE_URL`·
+   `SUPABASE_SERVICE_ROLE_KEY`(Secret), `MAX_FRAMES`·`MAX_UPLOAD_MB`·`RESULTS_MAX_MB`(Variable).
+
+무료 Space는 48시간 동안 아무도 안 쓰면 잠들었다가 다음 접속 때 1분쯤 걸려 깨어나고, 결과
+파일은 재시작 시 사라지므로 오래 보관하려면 Supabase 연동을 켜세요. 저장소 루트의
+`Dockerfile`이 Space용이고(포트 7860, 사용자 1000), README 맨 위의 `---` 블록이 Space 설정입니다.
+
+**어느 호스트든 디스크가 차지 않도록**: 결과 폴더 합계가 `RESULTS_MAX_MB`(기본 500 MB)를 넘으면
+오래된 것부터 자동 삭제하고, 업로드 전에 남은 공간을 확인해 부족하면 "서버 디스크 부족"
+메시지를 냅니다(507). 서버가 켜질 때 남아 있던 임시 업로드도 정리합니다.
 
 ### 인터넷에 공개할 때 비밀번호로 보호하기
 

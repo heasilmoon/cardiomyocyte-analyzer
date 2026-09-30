@@ -41,3 +41,22 @@ def test_apply_roi_scales_original_coordinates_to_downscaled_frames():
     assert cropped.shape == (3, 20, 40)
     assert (applied["x"], applied["y"], applied["w"], applied["h"]) == (40, 20, 80, 40)
     assert applied["analysis_px"] == {"x": 20, "y": 10, "w": 40, "h": 20}
+
+
+def test_prune_results_removes_oldest_until_under_cap(tmp_path):
+    import os
+    import time
+
+    from app.main import _prune_results
+
+    for i in range(4):
+        d = tmp_path / f"r{i}"
+        d.mkdir()
+        (d / "plot.png").write_bytes(b"x" * 1000)
+        t = time.time() - (10 - i) * 100  # r0 oldest
+        os.utime(d, (t, t))
+    removed = _prune_results(max_bytes=2500, results_dir=tmp_path)
+    assert removed == 2
+    assert not (tmp_path / "r0").exists() and not (tmp_path / "r1").exists()
+    assert (tmp_path / "r2").exists() and (tmp_path / "r3").exists()
+    assert _prune_results(max_bytes=0, results_dir=tmp_path) == 0  # disabled

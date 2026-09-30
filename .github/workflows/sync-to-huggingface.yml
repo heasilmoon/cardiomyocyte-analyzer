@@ -1,0 +1,34 @@
+# Mirrors this repository to a Hugging Face Space on every push to main, so
+# the hosted app updates itself without any terminal work.
+#
+# One-time setup (all in the browser):
+#   1. Create a Space at https://huggingface.co/new-space  (SDK: Docker, Blank).
+#   2. Create a write token at https://huggingface.co/settings/tokens .
+#   3. In this GitHub repo: Settings -> Secrets and variables -> Actions
+#        - Secrets  : HF_TOKEN  = the token from step 2
+#        - Variables: HF_SPACE  = <your-hf-username>/<space-name>
+#   4. Push (or run this workflow manually from the Actions tab).
+name: Sync to Hugging Face Space
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    if: ${{ vars.HF_SPACE != '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Push to the Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE: ${{ vars.HF_SPACE }}
+        run: |
+          set -e
+          if [ -z "$HF_TOKEN" ]; then echo "HF_TOKEN secret is not set"; exit 1; fi
+          HF_USER="${HF_SPACE%%/*}"
+          git push --force "https://${HF_USER}:${HF_TOKEN}@huggingface.co/spaces/${HF_SPACE}" HEAD:main
