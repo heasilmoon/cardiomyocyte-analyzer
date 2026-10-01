@@ -156,7 +156,7 @@ except Exception:
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "commit": RUNNING_COMMIT, "commit_date": RUNNING_COMMIT_DATE}
+    return {"status": "ok", "commit": RUNNING_COMMIT, "commit_date": RUNNING_COMMIT_DATE, "supabase": result_storage.status()}
 
 
 def _dir_size(path: Path) -> int:
@@ -401,10 +401,9 @@ async def analyze_beating_endpoint(
     result.beats_df.to_csv(result_dir / "data.csv", index=False)
     (result_dir / "summary.json").write_text(json.dumps(result.summary, indent=2))
     plotting.plot_beating(result, str(result_dir / "plot.png"))
-    result_storage.upload_result(result_id, result_dir, "beating", result.summary)
+    storage = result_storage.upload_result(result_id, result_dir, "beating", result.summary)
 
-    return {
-        "result_id": result_id,
+    return {"storage": storage, "result_id": result_id,
         "summary": result.summary,
         "urls": _urls(result_id, result_dir),
         "roi": applied_roi,
@@ -460,10 +459,9 @@ async def analyze_calcium_endpoint(
     result.transients_df.to_csv(result_dir / "data.csv", index=False)
     (result_dir / "summary.json").write_text(json.dumps(result.summary, indent=2))
     plotting.plot_calcium(result, str(result_dir / "plot.png"))
-    result_storage.upload_result(result_id, result_dir, "calcium", result.summary)
+    storage = result_storage.upload_result(result_id, result_dir, "calcium", result.summary)
 
-    return {
-        "result_id": result_id,
+    return {"storage": storage, "result_id": result_id,
         "summary": result.summary,
         "urls": _urls(result_id, result_dir),
         "roi": applied_roi,
@@ -506,9 +504,9 @@ async def analyze_morphology_endpoint(
     result.objects_df.to_csv(result_dir / "data.csv", index=False)
     (result_dir / "summary.json").write_text(json.dumps(result.summary, indent=2))
     plotting.plot_morphology(result, str(result_dir / "plot.png"))
-    result_storage.upload_result(result_id, result_dir, "morphology", result.summary)
+    storage = result_storage.upload_result(result_id, result_dir, "morphology", result.summary)
 
-    return {"result_id": result_id, "summary": result.summary, "urls": _urls(result_id, result_dir)}
+    return {"storage": storage, "result_id": result_id, "summary": result.summary, "urls": _urls(result_id, result_dir)}
 
 
 def _analyze_one(
@@ -599,9 +597,9 @@ async def analyze_batch_endpoint(
     result_id, result_dir = _new_result_dir()
     pd.DataFrame(summaries).to_csv(result_dir / "data.csv", index=False)
     (result_dir / "summary.json").write_text(json.dumps(summaries, indent=2))
-    result_storage.upload_result(result_id, result_dir, f"batch_{analysis_type}", summaries)
+    storage = result_storage.upload_result(result_id, result_dir, f"batch_{analysis_type}", summaries)
 
-    return {"result_id": result_id, "n_videos": len(summaries), "summaries": summaries, "urls": _urls(result_id, result_dir)}
+    return {"storage": storage, "result_id": result_id, "n_videos": len(summaries), "summaries": summaries, "urls": _urls(result_id, result_dir)}
 
 
 def _parse_batch_labels(text: str | None, expected_count: int, field_name: str) -> list[str] | None:
@@ -746,7 +744,7 @@ async def analyze_compare_endpoint(request: Request):
     pd.DataFrame(combined_rows).to_csv(result_dir / "data.csv", index=False)
     (result_dir / "summary.json").write_text(json.dumps(comparison, indent=2))
     panel_files = plotting.plot_group_comparison(comparison, str(result_dir / "plot.png"), panels_dir=str(result_dir))
-    result_storage.upload_result(result_id, result_dir, "compare", comparison)
+    storage = result_storage.upload_result(result_id, result_dir, "compare", comparison)
 
     panels = [
         {
@@ -757,7 +755,7 @@ async def analyze_compare_endpoint(request: Request):
         }
         for p in panel_files
     ]
-    return {"result_id": result_id, "comparison": comparison, "urls": _urls(result_id, result_dir), "panels": panels}
+    return {"storage": storage, "result_id": result_id, "comparison": comparison, "urls": _urls(result_id, result_dir), "panels": panels}
 
 
 @app.post("/api/validate/agreement")
@@ -802,9 +800,9 @@ async def validate_agreement_endpoint(
     stats_only = {k: v for k, v in agreement.items() if k not in ("values_a", "values_b", "diffs", "means")}
     (result_dir / "summary.json").write_text(json.dumps(stats_only, indent=2))
     plotting.plot_agreement(agreement, label_a, label_b, str(result_dir / "plot.png"))
-    result_storage.upload_result(result_id, result_dir, "validate_agreement", stats_only)
+    storage = result_storage.upload_result(result_id, result_dir, "validate_agreement", stats_only)
 
-    return {"result_id": result_id, "stats": stats_only, "urls": _urls(result_id, result_dir)}
+    return {"storage": storage, "result_id": result_id, "stats": stats_only, "urls": _urls(result_id, result_dir)}
 
 
 def _load_projection(file: UploadFile):
@@ -837,9 +835,9 @@ async def analyze_colocalization_endpoint(
     plotting.plot_colocalization(
         projection_a, projection_b, coloc_stats, label_a, label_b, str(result_dir / "plot.png")
     )
-    result_storage.upload_result(result_id, result_dir, "colocalization", coloc_stats)
+    storage = result_storage.upload_result(result_id, result_dir, "colocalization", coloc_stats)
 
-    return {"result_id": result_id, "stats": coloc_stats, "urls": _urls(result_id, result_dir)}
+    return {"storage": storage, "result_id": result_id, "stats": coloc_stats, "urls": _urls(result_id, result_dir)}
 
 
 # Mounted last so it never shadows the /api/* and /results/* routes above.
