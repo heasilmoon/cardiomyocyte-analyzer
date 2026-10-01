@@ -172,6 +172,18 @@ function formatP(p, style) {
   return `${parseFloat(p.toPrecision(2))} (${nejmStars(p)})`;
 }
 
+// One line telling the user whether this result was also saved to Supabase.
+function storageNote(storage) {
+  if (!storage) return "";
+  if (!storage.configured) {
+    return `<p class="roi-applied-note">☁️ Supabase 미설정: 결과는 이 서버의 디스크에만 있습니다 (서버 재시작 시 사라질 수 있음). 설정법은 README "결과 영구 저장하기".</p>`;
+  }
+  if (storage.ok) {
+    return `<p class="roi-applied-note">☁️ Supabase에 저장됨 (파일 ${storage.n_files}개 + 요약 행).</p>`;
+  }
+  return `<div class="warning-banner">⚠️ Supabase 저장 실패: ${storage.error || "알 수 없는 오류"}</div>`;
+}
+
 function renderResults(container, data) {
   const { summary, urls, roi } = data;
   const rows = Object.entries(summary)
@@ -237,6 +249,7 @@ function renderResults(container, data) {
     ${roiNote}
     ${urls.plot ? `<img src="${API_BASE}${urls.plot}" alt="result plot" />` : ""}
     <table class="summary">${rows}</table>
+    ${storageNote(data.storage)}
     <div class="links">
       ${urls.csv ? `<a href="${API_BASE}${urls.csv}" download>CSV 다운로드</a>` : ""}
       ${urls.summary ? `<a href="${API_BASE}${urls.summary}" download>요약 JSON 다운로드</a>` : ""}
@@ -641,6 +654,7 @@ function renderComparisonResults(container, data) {
     ${panelGrid}
     <p class="roi-applied-note">그룹: ${groupHeaders} &middot; 검정: ${testFamilyText}${comparison.layout === "clustered" ? " (묶음 안에서 비교)" : ""} &middot; 오차막대: ${errorBarLabel}</p>
     ${tables}
+    ${storageNote(data.storage)}
     <div class="links">
       ${urls.plot ? `<a href="${API_BASE}${urls.plot}" download>그림 PNG (300 dpi)</a>` : ""}
       ${urls.plot_svg ? `<a href="${API_BASE}${urls.plot_svg}" download>그림 SVG (벡터, Illustrator/Inkscape 편집용)</a>` : ""}
@@ -965,6 +979,18 @@ document.querySelectorAll("form[data-endpoint]").forEach((form) => {
     const info = await res.json();
     if (info.commit) {
       el.textContent = `버전 ${info.commit}${info.commit_date ? ` (${info.commit_date})` : ""}`;
+    }
+    if (info.supabase) {
+      const s = info.supabase;
+      const txt = !s.configured
+        ? " · Supabase 미설정"
+        : s.client_error
+          ? " · Supabase 연결 오류"
+          : s.last_ok === false
+            ? " · Supabase 저장 실패 (최근)"
+            : " · Supabase 연결됨";
+      el.textContent += txt;
+      el.title += s.client_error || s.last_error ? `\nSupabase: ${s.client_error || s.last_error}` : "";
     }
   } catch (e) {
     /* offline or old backend without version info: leave blank */

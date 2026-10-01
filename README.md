@@ -308,10 +308,25 @@ create table if not exists analysis_results (
 버킷이 비공개여야 합니다 — 서버가 `service_role` 키로만 파일을 읽고 쓰고, 사용자에게는 항상
 이 앱의 `/results/...` 경로를 통해서만 전달하기 때문입니다.
 
-**4. Render에 연결하기**
-Render 대시보드 → 서비스 → **Environment** 탭에서 아래 두 개를 추가하고 저장(재배포)하세요.
-- `SUPABASE_URL` = 1번에서 복사한 Project URL
-- `SUPABASE_SERVICE_ROLE_KEY` = 1번에서 복사한 service_role 키
+**4. 서버에 키 알려주기**
+- Render: 대시보드 → 서비스 → **Environment** 탭. Hugging Face Space: **Settings → Variables and
+  secrets**. 아래 두 개를 추가하고 저장(재배포)하세요.
+  - `SUPABASE_URL` = 1번에서 복사한 Project URL
+  - `SUPABASE_SERVICE_ROLE_KEY` = 1번에서 복사한 service_role 키
+- **내 컴퓨터에서 돌리는 서버**(`run_mac.command` 등)는 환경변수 대신 **`backend/.env` 파일**을
+  읽습니다: `backend/.env.example`을 복사해 `backend/.env`로 이름을 바꾸고 텍스트 편집기로 두 값을
+  채운 뒤 서버를 다시 켜면 됩니다(이 파일은 git에 올라가지 않습니다).
+
+**결과가 Supabase에 안 보일 때 확인할 것**
+- 화면 맨 위 버전 표시 옆에 "Supabase 연결됨 / 미설정 / 저장 실패"가 뜹니다. **미설정**이면 지금
+  쓰는 그 서버(로컬이면 `.env`, Render/Space면 그쪽 설정)에 키가 없는 것입니다 — Render에 넣은
+  키는 로컬 서버에 적용되지 않습니다.
+- 분석 결과 아래에도 "☁️ Supabase에 저장됨" 또는 "⚠️ Supabase 저장 실패: (이유)"가 표시됩니다.
+  실패 이유에 bucket 관련 문구가 있으면 버킷 이름이 정확히 `results`인지, relation 관련 문구면
+  2번 SQL을 실행했는지, JWT/401/403이면 `anon` 키가 아니라 `service_role` 키인지 확인하세요.
+- `/api/health`(예: `http://localhost:8000/api/health`)를 열면 같은 정보가 JSON으로 나옵니다.
+- 저장된 결과는 Supabase 대시보드 **Table Editor → analysis_results**(요약 행)와 **Storage →
+  results**(파일)에서 볼 수 있습니다.
 
 두 값이 모두 설정된 순간부터 새로 분석하는 결과부터 Supabase에도 같이 저장됩니다(그 이전에
 로컬에만 저장됐던 결과는 소급 적용되지 않습니다). Supabase 업로드가 실패해도(네트워크 문제 등)

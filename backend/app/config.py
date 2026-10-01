@@ -11,6 +11,28 @@ for d in (STORAGE_DIR, UPLOADS_DIR, RESULTS_DIR):
     d.mkdir(parents=True, exist_ok=True)
 
 
+def _load_dotenv(path: Path) -> None:
+    """Load KEY=VALUE lines from backend/.env into the environment (without
+    overriding variables that are already set). Lets a local user put
+    SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY / APP_PASSWORD in a text file
+    instead of exporting them in a terminal. Lines starting with # are
+    comments; surrounding quotes are stripped."""
+    if not path.is_file():
+        return
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+_load_dotenv(BASE_DIR / ".env")
+
+
 def _env_int(name: str, default: int) -> int:
     raw = os.environ.get(name)
     if raw is None or not raw.strip():
