@@ -76,6 +76,8 @@ _EXCLUDED_METRICS = {
     # Signal-quality / pre-processing diagnostics (see beating.analyze_beating)
     "periodicity_score",
     "signal_to_noise",
+    "fallback_reference_periodicity_score",
+    "fallback_reference_signal_to_noise",
     "n_spikes_removed",
     "detrend_window_s",
     "um_per_px",
