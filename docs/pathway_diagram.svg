@@ -1,0 +1,114 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1760" height="900" viewBox="0 0 1760 900" font-family="'Noto Sans KR', 'Liberation Sans', Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+      <path d="M1 1 L11 6 L1 11 Z" fill="#14213d"/>
+    </marker>
+    <marker id="arrow-red" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+      <path d="M1 1 L11 6 L1 11 Z" fill="#c8102e"/>
+    </marker>
+    <marker id="arrow-sm" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M1 1 L11 6 L1 11 Z" fill="#14213d"/>
+    </marker>
+    <style>
+      .t  { fill:#14213d; font-weight:700; font-size:28px; }
+      .s  { fill:#14213d; font-weight:500; font-size:22px; }
+      .h  { fill:#14213d; font-weight:700; font-size:30px; }
+      .ln { stroke:#14213d; stroke-width:4; fill:none; stroke-linecap:round; }
+      .box{ fill:#ffffff; stroke:#14213d; stroke-width:4; }
+    </style>
+  </defs>
+
+  <rect width="1760" height="900" fill="#ffffff"/>
+
+  <!-- cell -->
+  <rect x="90" y="150" width="1040" height="640" rx="80" fill="#f4f7fb" stroke="#14213d" stroke-width="7"/>
+  <rect x="104" y="164" width="1012" height="612" rx="68" fill="none" stroke="#14213d" stroke-width="2.5"/>
+
+  <!-- ===== inputs ===== -->
+  <text x="360" y="46" text-anchor="middle" class="t">알도스테론</text>
+  <text x="360" y="78" text-anchor="middle" class="s">100 nM</text>
+  <path d="M360 92 V252" class="ln" stroke-dasharray="12 10" marker-end="url(#arrow)"/>
+
+  <text x="560" y="46" text-anchor="middle" class="t">TGF-β1</text>
+  <text x="560" y="78" text-anchor="middle" class="s">1~2 ng/mL</text>
+  <path d="M560 92 V118" class="ln" marker-end="url(#arrow)"/>
+  <!-- receptor -->
+  <rect x="534" y="120" width="22" height="70" rx="8" class="box"/>
+  <rect x="564" y="120" width="22" height="70" rx="8" class="box"/>
+  <text x="522" y="128" text-anchor="end" class="s">TGFBR1/2</text>
+  <path d="M560 192 V252" class="ln" marker-end="url(#arrow)"/>
+
+  <text x="900" y="46" text-anchor="middle" class="t">저산소</text>
+  <text x="900" y="78" text-anchor="middle" class="s">1% O₂</text>
+  <path d="M900 92 V252" class="ln" marker-end="url(#arrow)"/>
+  <text x="884" y="212" text-anchor="end" class="s">PHD 억제</text>
+
+  <!-- ===== first row boxes ===== -->
+  <rect x="300" y="258" width="120" height="62" rx="12" class="box"/>
+  <text x="360" y="300" text-anchor="middle" class="t">MR</text>
+
+  <rect x="470" y="258" width="180" height="62" rx="12" class="box"/>
+  <text x="560" y="300" text-anchor="middle" class="t">SMAD2/3</text>
+  <circle cx="652" cy="262" r="17" fill="#14213d"/>
+  <text x="652" y="269" text-anchor="middle" fill="#ffffff" font-weight="700" font-size="20px">P</text>
+
+  <rect x="830" y="258" width="140" height="62" rx="12" class="box"/>
+  <text x="900" y="300" text-anchor="middle" class="t">HIF-1α</text>
+
+  <!-- eplerenone -->
+  <text x="256" y="298" text-anchor="end" class="t" font-size="24px">eplerenone</text>
+  <path d="M264 289 H292" class="ln"/>
+  <path d="M292 275 V303" class="ln" stroke-width="5"/>
+
+  <!-- ===== ROS ===== -->
+  <circle cx="760" cy="445" r="50" fill="#fff5f5" stroke="#c8102e" stroke-width="4" stroke-dasharray="10 9"/>
+  <text x="760" y="457" text-anchor="middle" fill="#c8102e" font-weight="700" font-size="34px">ROS</text>
+
+  <!-- mitochondria -->
+  <ellipse cx="1000" cy="445" rx="78" ry="42" fill="#ffffff" stroke="#14213d" stroke-width="4"/>
+  <ellipse cx="1000" cy="445" rx="62" ry="28" fill="none" stroke="#14213d" stroke-width="2.5"/>
+  <path d="M975 420 Q968 445 975 470 M1000 418 Q994 445 1000 472 M1025 420 Q1018 445 1025 470" stroke="#14213d" stroke-width="2.5" fill="none"/>
+  <text x="1000" y="518" text-anchor="middle" class="s">미토콘드리아</text>
+
+  <!-- HIF-1α -> mitochondria (curved) -->
+  <path d="M940 322 C990 350 1010 370 1000 398" class="ln" marker-end="url(#arrow)"/>
+  <!-- mitochondria -> ROS (red) -->
+  <path d="M920 445 H816" class="ln" stroke="#c8102e" marker-end="url(#arrow-red)"/>
+
+  <!-- MR -> ROS (NADPH oxidase) -->
+  <path d="M422 318 L708 428" class="ln" marker-end="url(#arrow)"/>
+  <text x="590" y="362" text-anchor="middle" class="s" transform="rotate(19 590 362)">NADPH oxidase</text>
+
+  <!-- ===== target genes ===== -->
+  <ellipse cx="540" cy="650" rx="260" ry="90" fill="#e9eef5" stroke="#14213d" stroke-width="4"/>
+  <text x="540" y="612" text-anchor="middle" class="s">표적 유전자</text>
+  <text x="540" y="650" text-anchor="middle" class="t">CCN2, SERPINE1, SNAI1</text>
+  <text x="540" y="688" text-anchor="middle" class="t">COL1A1, ACTA2, FN1</text>
+
+  <!-- arrows into target genes -->
+  <path d="M370 322 L430 560" class="ln" marker-end="url(#arrow)"/>
+  <path d="M560 322 V556" class="ln" marker-end="url(#arrow)"/>
+  <path d="M850 322 C 740 340 666 420 678 572" class="ln" marker-end="url(#arrow)"/>
+  <path d="M735 492 L640 568" class="ln" stroke="#c8102e" marker-end="url(#arrow-red)"/>
+
+  <!-- target genes -> outcomes (exits the cell) -->
+  <path d="M800 655 C 1050 655 1125 560 1178 410" class="ln" marker-end="url(#arrow)"/>
+
+  <!-- ===== outcomes ===== -->
+  <text x="1230" y="222" class="h">내피세포</text>
+  <path d="M1200 245 V338" class="ln" stroke-width="3"/>
+  <path d="M1200 290 H1222" class="ln" stroke-width="3" marker-end="url(#arrow-sm)"/>
+  <path d="M1200 338 H1222" class="ln" stroke-width="3" marker-end="url(#arrow-sm)"/>
+  <text x="1236" y="299" class="t">EndMT <tspan class="s" dx="10">CD31 ↓, VE-cadherin ↓, α-SMA ↑</tspan></text>
+  <text x="1236" y="347" class="t">장벽 소실 <tspan class="s" dx="10">FITC-dextran 투과도 ↑, TEER ↓</tspan></text>
+
+  <text x="1230" y="452" class="h">오가노이드</text>
+  <path d="M1200 475 V568" class="ln" stroke-width="3"/>
+  <path d="M1200 520 H1222" class="ln" stroke-width="3" marker-end="url(#arrow-sm)"/>
+  <path d="M1200 568 H1222" class="ln" stroke-width="3" marker-end="url(#arrow-sm)"/>
+  <text x="1236" y="529" class="t">섬유화 <tspan class="s" dx="10">COL1A1, ACTA2, FN1 ↑</tspan></text>
+  <text x="1236" y="577" class="t">세관 손상 <tspan class="s" dx="10">KIM-1, NGAL ↑</tspan></text>
+
+  <!-- caption -->
+  <text x="590" y="862" text-anchor="middle" class="t" font-size="27px">iPSC-EC와 신장 오가노이드에서 공통으로 작동하는 경로</text>
+</svg>
