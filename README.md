@@ -222,6 +222,11 @@ GitHub Pages는 정적 페이지만 호스팅해서 이 앱(Python 서버가 영
 PORTS 탭에서 8000 포트를 오른쪽 클릭 → Port Visibility → Public으로 바꾸면 되지만, Codespace가
 켜져 있는 동안만 열립니다.
 
+> **GitHub Pages를 켜 두었다면**: 저장소 루트의 `.nojekyll` 파일 덕분에 Pages는 Jekyll 빌드 없이
+> 안내 페이지(`index.html`)만 올립니다. 이 파일이 없으면 Jekyll이 `paper/paper.md`의 자리표시자
+> 날짜를 읽다가 실패해 커밋 옆에 빨간 ✗가 뜹니다. Pages가 필요 없으면 Settings → Pages →
+> Source를 **None**으로 끄면 됩니다.
+
 ### 터미널 없이 인터넷에 올리기 — Hugging Face Spaces (권장)
 
 Render 무료 플랜은 메모리 512 MB·디스크 몇 GB라 HD 영상(1080p·60 fps)을 여러 개 올리면 "저장공간
